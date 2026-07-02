@@ -19,7 +19,7 @@ scene.fog = new THREE.Fog(skyColor, 26, 50);
 // window happens to be. Since the aspect ratio never changes, the camera's
 // frustum and angle are fixed too -- no more adapting per resize.
 const GAME_ASPECT = 3 / 4;
-const ORTHO_HALF_WIDTH = 6;
+const ORTHO_HALF_WIDTH = 4.5;
 const ORTHO_HALF_HEIGHT = ORTHO_HALF_WIDTH / GAME_ASPECT;
 const camera = new THREE.OrthographicCamera(
   -ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH,
