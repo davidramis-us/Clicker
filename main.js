@@ -187,11 +187,16 @@ class Chicken {
     // State
     this.state = 'walk';
     this.speed = 1.0 + Math.random() * 0.6;
+    this.walkSpeed = 0.35 + Math.random() * 0.25;
     this.heading = Math.random() * Math.PI * 2;
     this.target = this.pickTarget();
     this.walkClock = Math.random() * 10;
     this.flightHeight = 3.5 + Math.random() * 1.5;
     this.flapSpeed = 10 + Math.random() * 4;
+
+    // Occasional resting: set once it arrives at a target, counts down with
+    // no movement, then it picks a new target and wanders off again.
+    this.restTimer = 0.5 + Math.random() * 2;
 
     // Click-agitation: each click adds a jolt that decays over time, so only
     // a burst of clicks arriving faster than the decay pushes it past the
@@ -232,7 +237,12 @@ class Chicken {
     this.walkClock += dt;
 
     if (this.state === 'walk') {
-      this.updateGroundMovement(dt);
+      let isWalking = false;
+      if (this.restTimer > 0) {
+        this.restTimer -= dt;
+      } else {
+        isWalking = this.updateGroundMovement(dt);
+      }
 
       // agitation fades unless clicks keep landing faster than it decays
       this.agitation = Math.max(0, this.agitation - this.agitationDecayPerSecond * dt);
@@ -247,16 +257,18 @@ class Chicken {
       // agitation decays, so a burst of clicks visibly suspends it in the air
       const lift = alertRatio * this.preFlightLift;
 
-      // gentle leg waddle, wings mostly folded, flared briefly on a flinch,
-      // raised more the higher it's being held up
-      const swing = Math.sin(this.walkClock * this.speed * 6) * 0.35;
+      // gentle leg waddle while actually walking, legs stay put while
+      // resting, wings mostly folded, flared briefly on a flinch or the
+      // higher it's being held up
+      const swing = isWalking ? Math.sin(this.walkClock * this.walkSpeed * 8) * 0.35 : 0;
       this.legs[0].rotation.x = swing - alertRatio * 0.9;
       this.legs[1].rotation.x = -swing - alertRatio * 0.9;
       this.wings.forEach(({ pivot, side }) => {
         pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05 + flinch * 0.6 + alertRatio * 0.5);
       });
-      // small body bob, a startled hop while flinching, plus the sustained lift
-      this.group.position.y = Math.abs(Math.sin(this.walkClock * this.speed * 6)) * 0.05 + flinch * 0.2 + lift;
+      // small body bob while walking, a startled hop while flinching, plus the sustained lift
+      const bob = isWalking ? Math.abs(Math.sin(this.walkClock * this.walkSpeed * 8)) * 0.05 : 0;
+      this.group.position.y = bob + flinch * 0.2 + lift;
     } else {
       this.updateFlying(dt);
       // fast wing flap
@@ -273,8 +285,9 @@ class Chicken {
     const dist = toTarget.length();
 
     if (dist < 0.3) {
+      this.restTimer = 1.5 + Math.random() * 3.5;
       this.target = this.pickTarget();
-      return;
+      return false;
     }
 
     toTarget.normalize();
@@ -282,9 +295,10 @@ class Chicken {
     this.heading = lerpAngle(this.heading, desiredHeading, 1 - Math.pow(0.001, dt));
     this.group.rotation.y = this.heading;
 
-    const moveDist = this.speed * dt;
+    const moveDist = this.walkSpeed * dt;
     this.group.position.x += Math.sin(this.heading) * moveDist;
     this.group.position.z += Math.cos(this.heading) * moveDist;
+    return true;
   }
 
   updateFlying(dt) {
