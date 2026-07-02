@@ -367,7 +367,7 @@ function updateEggs(dt) {
 
 const chickenColors = [0xf5f0e6, 0x8b5a2b, 0x3a2a1a, 0xe8d9b5];
 const chickens = [];
-const CHICKEN_COUNT = 7;
+const CHICKEN_COUNT = 12;
 
 for (let i = 0; i < CHICKEN_COUNT; i++) {
   const color = chickenColors[Math.floor(Math.random() * chickenColors.length)];
