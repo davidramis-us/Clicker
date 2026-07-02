@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(node --version)",
+      "PowerShell(npm --version)",
+      "Bash(git init *)",
+      "Bash(mkdir -p \"C:\\\\Users\\\\dramis\\\\Desktop\\\\Claude-click\\\\.claude\")",
+      "Bash(git add *)"
+    ]
+  }
+}
