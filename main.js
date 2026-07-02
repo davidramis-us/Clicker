@@ -197,7 +197,7 @@ class Chicken {
     // a burst of clicks arriving faster than the decay pushes it past the
     // threshold and into flight — a single stray click just fades away.
     this.agitation = 0;
-    this.agitationThreshold = 3;
+    this.agitationThreshold = 7;
     this.agitationPerClick = 1;
     this.agitationDecayPerSecond = 1.1;
     this.flinchTimer = 0;
