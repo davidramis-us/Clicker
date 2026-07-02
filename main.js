@@ -129,6 +129,9 @@ treeSpots.forEach(([x, z]) => scene.add(makeTree(x, z)));
 // ---------- Chicken ----------
 
 const BOUNDS = GROUND_SIZE * 0.5 - 2;
+const FLEE_DISTANCE = 4;
+const FLEE_SPEED_MULTIPLIER = 2.4;
+const FLEE_BOOST_DURATION = 0.9;
 
 class Chicken {
   constructor(bodyColor) {
@@ -227,12 +230,19 @@ class Chicken {
     // Click-agitation: each click adds a jolt that decays over time, so only
     // a burst of clicks arriving faster than the decay pushes it past the
     // threshold and into flight — a single stray click just fades away.
+    // Below liftStartAgitation it just bolts along the ground; from there up
+    // to the threshold it starts visibly lifting off before committing to
+    // real flight.
     this.agitation = 0;
-    this.agitationThreshold = 7;
+    this.agitationThreshold = 8;
+    this.liftStartAgitation = 5;
     this.agitationPerClick = 1;
-    this.agitationDecayPerSecond = 1.1;
+    this.agitationDecayPerSecond = 0.6;
     this.flinchTimer = 0;
     this.preFlightLift = 1.7; // how high the agitation alone can hoist it before real flight kicks in
+
+    // A click briefly boosts ground speed so fleeing reads as a panicked dash
+    this.fleeBoostTimer = 0;
   }
 
   pickTarget() {
@@ -242,14 +252,40 @@ class Chicken {
     );
   }
 
-  registerClick() {
+  registerClick(clickPoint) {
     if (this.state !== 'walk') return;
     spawnEgg(this.group.position.x, this.group.position.z, this.heading);
+    this.flee(clickPoint);
     this.agitation = Math.min(this.agitationThreshold, this.agitation + this.agitationPerClick);
     this.flinchTimer = 0.25;
     if (this.agitation >= this.agitationThreshold) {
       this.startFlying();
     }
+  }
+
+  // Darts away from wherever the click actually landed on its body, so
+  // clicking its left side sends it right and vice versa -- every click
+  // provokes this ground dash, independent of the agitation/flight buildup.
+  flee(clickPoint) {
+    const away = new THREE.Vector2(
+      this.group.position.x - clickPoint.x,
+      this.group.position.z - clickPoint.z
+    );
+    if (away.lengthSq() < 0.0001) {
+      const randomAngle = Math.random() * Math.PI * 2;
+      away.set(Math.sin(randomAngle), Math.cos(randomAngle));
+    } else {
+      away.normalize();
+    }
+
+    this.heading = Math.atan2(away.x, away.y);
+    this.group.rotation.y = this.heading;
+    this.target = new THREE.Vector2(
+      THREE.MathUtils.clamp(this.group.position.x + away.x * FLEE_DISTANCE, -BOUNDS, BOUNDS),
+      THREE.MathUtils.clamp(this.group.position.z + away.y * FLEE_DISTANCE, -BOUNDS, BOUNDS)
+    );
+    this.restTimer = 0;
+    this.fleeBoostTimer = FLEE_BOOST_DURATION;
   }
 
   startFlying() {
@@ -264,11 +300,14 @@ class Chicken {
     this.walkClock += dt;
 
     if (this.state === 'walk') {
+      if (this.fleeBoostTimer > 0) this.fleeBoostTimer -= dt;
+      const speedMultiplier = this.fleeBoostTimer > 0 ? FLEE_SPEED_MULTIPLIER : 1;
+
       let isWalking = false;
       if (this.restTimer > 0) {
         this.restTimer -= dt;
       } else {
-        isWalking = this.updateGroundMovement(dt);
+        isWalking = this.updateGroundMovement(dt, speedMultiplier);
       }
 
       // agitation fades unless clicks keep landing faster than it decays
@@ -280,21 +319,25 @@ class Chicken {
       if (this.flinchTimer > 0) this.flinchTimer -= dt;
       const flinch = this.flinchTimer > 0 ? Math.sin((this.flinchTimer / 0.25) * Math.PI) : 0;
 
-      // each click's agitation hoists it a bit higher; it sinks back only as
-      // agitation decays, so a burst of clicks visibly suspends it in the air
-      const lift = alertRatio * this.preFlightLift;
+      // below liftStartAgitation it's purely a ground dash; only past that
+      // point does it start visibly lifting off ahead of committing to flight
+      const liftRatio = THREE.MathUtils.clamp(
+        (this.agitation - this.liftStartAgitation) / (this.agitationThreshold - this.liftStartAgitation),
+        0, 1
+      );
+      const lift = liftRatio * this.preFlightLift;
 
-      // gentle leg waddle while actually walking, legs stay put while
-      // resting, wings mostly folded, flared briefly on a flinch or the
-      // higher it's being held up
-      const swing = isWalking ? Math.sin(this.walkClock * this.walkSpeed * 8) * 0.35 : 0;
-      this.legs[0].rotation.x = swing - alertRatio * 0.9;
-      this.legs[1].rotation.x = -swing - alertRatio * 0.9;
+      // leg waddle speeds up while fleeing, legs stay put while resting,
+      // wings mostly folded, flared briefly on a flinch or the higher it's
+      // being held up
+      const swing = isWalking ? Math.sin(this.walkClock * this.walkSpeed * speedMultiplier * 8) * 0.35 : 0;
+      this.legs[0].rotation.x = swing - liftRatio * 0.9;
+      this.legs[1].rotation.x = -swing - liftRatio * 0.9;
       this.wings.forEach(({ pivot, side }) => {
-        pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05 + flinch * 0.6 + alertRatio * 0.5);
+        pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05 + flinch * 0.6 + liftRatio * 0.5);
       });
       // small body bob while walking, a startled hop while flinching, plus the sustained lift
-      const bob = isWalking ? Math.abs(Math.sin(this.walkClock * this.walkSpeed * 8)) * 0.05 : 0;
+      const bob = isWalking ? Math.abs(Math.sin(this.walkClock * this.walkSpeed * speedMultiplier * 8)) * 0.05 : 0;
       this.group.position.y = bob + flinch * 0.2 + lift;
     } else {
       this.updateFlying(dt);
@@ -306,7 +349,7 @@ class Chicken {
     }
   }
 
-  updateGroundMovement(dt) {
+  updateGroundMovement(dt, speedMultiplier = 1) {
     const pos2 = new THREE.Vector2(this.group.position.x, this.group.position.z);
     const toTarget = this.target.clone().sub(pos2);
     const dist = toTarget.length();
@@ -322,7 +365,7 @@ class Chicken {
     this.heading = lerpAngle(this.heading, desiredHeading, 1 - Math.pow(0.001, dt));
     this.group.rotation.y = this.heading;
 
-    const moveDist = this.walkSpeed * dt;
+    const moveDist = this.walkSpeed * speedMultiplier * dt;
     this.group.position.x += Math.sin(this.heading) * moveDist;
     this.group.position.z += Math.cos(this.heading) * moveDist;
     return true;
@@ -426,7 +469,7 @@ renderer.domElement.addEventListener('click', (event) => {
   if (intersects.length > 0) {
     let obj = intersects[0].object;
     while (obj && !obj.userData.chicken) obj = obj.parent;
-    if (obj) obj.userData.chicken.registerClick();
+    if (obj) obj.userData.chicken.registerClick(intersects[0].point);
   }
 });
 
