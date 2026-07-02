@@ -175,6 +175,15 @@ class Chicken {
       this.legs.push(leg);
     });
 
+    // Alert mark, grows as clicks agitate the chicken, hidden otherwise
+    this.alert = new THREE.Mesh(
+      new THREE.ConeGeometry(0.09, 0.26, 4),
+      new THREE.MeshStandardMaterial({ color: 0xff3b30, flatShading: true })
+    );
+    this.alert.position.set(0, 1.55, 0.3);
+    this.alert.scale.setScalar(0.0001);
+    this.group.add(this.alert);
+
     // State
     this.state = 'walk';
     this.speed = 1.0 + Math.random() * 0.6;
@@ -183,6 +192,15 @@ class Chicken {
     this.walkClock = Math.random() * 10;
     this.flightHeight = 3.5 + Math.random() * 1.5;
     this.flapSpeed = 10 + Math.random() * 4;
+
+    // Click-agitation: each click adds a jolt that decays over time, so only
+    // a burst of clicks arriving faster than the decay pushes it past the
+    // threshold and into flight — a single stray click just fades away.
+    this.agitation = 0;
+    this.agitationThreshold = 3;
+    this.agitationPerClick = 1;
+    this.agitationDecayPerSecond = 1.1;
+    this.flinchTimer = 0;
   }
 
   pickTarget() {
@@ -192,9 +210,20 @@ class Chicken {
     );
   }
 
+  registerClick() {
+    if (this.state !== 'walk') return;
+    this.agitation = Math.min(this.agitationThreshold, this.agitation + this.agitationPerClick);
+    this.flinchTimer = 0.25;
+    if (this.agitation >= this.agitationThreshold) {
+      this.startFlying();
+    }
+  }
+
   startFlying() {
     if (this.state === 'fly') return;
     this.state = 'fly';
+    this.agitation = 0;
+    this.alert.scale.setScalar(0.0001);
     this.target = this.pickTarget();
   }
 
@@ -203,15 +232,25 @@ class Chicken {
 
     if (this.state === 'walk') {
       this.updateGroundMovement(dt);
-      // gentle leg waddle, wings mostly folded
+
+      // agitation fades unless clicks keep landing faster than it decays
+      this.agitation = Math.max(0, this.agitation - this.agitationDecayPerSecond * dt);
+      const alertRatio = this.agitation / this.agitationThreshold;
+      this.alert.scale.setScalar(Math.max(0.0001, alertRatio));
+      this.alert.rotation.y += dt * 3;
+
+      if (this.flinchTimer > 0) this.flinchTimer -= dt;
+      const flinch = this.flinchTimer > 0 ? Math.sin((this.flinchTimer / 0.25) * Math.PI) : 0;
+
+      // gentle leg waddle, wings mostly folded, flared briefly on a flinch
       const swing = Math.sin(this.walkClock * this.speed * 6) * 0.35;
       this.legs[0].rotation.x = swing;
       this.legs[1].rotation.x = -swing;
       this.wings.forEach(({ pivot, side }) => {
-        pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05);
+        pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05 + flinch * 0.6);
       });
-      // small body bob
-      this.group.position.y = Math.abs(Math.sin(this.walkClock * this.speed * 6)) * 0.05;
+      // small body bob, plus a startled hop while flinching
+      this.group.position.y = Math.abs(Math.sin(this.walkClock * this.speed * 6)) * 0.05 + flinch * 0.2;
     } else {
       this.updateFlying(dt);
       // fast wing flap
@@ -307,7 +346,7 @@ renderer.domElement.addEventListener('click', (event) => {
   if (intersects.length > 0) {
     let obj = intersects[0].object;
     while (obj && !obj.userData.chicken) obj = obj.parent;
-    if (obj) obj.userData.chicken.startFlying();
+    if (obj) obj.userData.chicken.registerClick();
   }
 });
 
