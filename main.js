@@ -12,15 +12,35 @@ const skyColor = 0xbfe8ff;
 scene.background = new THREE.Color(skyColor);
 scene.fog = new THREE.Fog(skyColor, 26, 50);
 
-const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
-camera.position.set(0, 15, 17);
-camera.lookAt(0, 0, 0);
+// An orthographic camera keeps a fixed visible width in world units no
+// matter the aspect ratio, so the yard stays the same relative size on
+// screen whether the window is wide, narrow, or portrait -- only the
+// visible height changes, revealing more or less of the yard vertically.
+const ORTHO_HALF_WIDTH = 12;
+const camera = new THREE.OrthographicCamera(-ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH, -ORTHO_HALF_WIDTH, 0.1, 100);
+
+// The landscape framing looks at the yard from a shallow angle, which puts a
+// horizon partway up the screen. On a narrow/portrait screen that shallow
+// angle would waste most of the extra vertical room on empty sky above the
+// horizon, so the camera tips toward looking straight down as the screen
+// gets taller than it is wide -- a top-down view has no horizon, so the
+// extra height reveals more yard instead.
+const LANDSCAPE_CAMERA_POS = new THREE.Vector3(0, 15, 17);
+const PORTRAIT_CAMERA_POS = new THREE.Vector3(0, 22, 5);
 
 function resize() {
   const width = window.innerWidth;
   const height = window.innerHeight;
   if (width === 0 || height === 0) return;
-  camera.aspect = width / height;
+  const aspect = width / height;
+
+  const portraitBlend = THREE.MathUtils.clamp((0.9 - aspect) / (0.9 - 0.45), 0, 1);
+  camera.position.lerpVectors(LANDSCAPE_CAMERA_POS, PORTRAIT_CAMERA_POS, portraitBlend);
+  camera.lookAt(0, 0, 0);
+
+  const halfHeight = ORTHO_HALF_WIDTH / aspect;
+  camera.top = halfHeight;
+  camera.bottom = -halfHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(width, height);
 }
