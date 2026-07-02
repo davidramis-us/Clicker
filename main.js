@@ -252,10 +252,10 @@ class Chicken {
     );
   }
 
-  registerClick(clickNDC) {
+  registerClick(groundClickPoint) {
     if (this.state !== 'walk') return;
     spawnEgg(this.group.position.x, this.group.position.z, this.heading);
-    this.flee(clickNDC);
+    this.flee(groundClickPoint);
     this.agitation = Math.min(this.agitationThreshold, this.agitation + this.agitationPerClick);
     this.flinchTimer = 0.25;
     if (this.agitation >= this.agitationThreshold) {
@@ -263,30 +263,30 @@ class Chicken {
     }
   }
 
-  // Darts away based on where the click landed across the chicken's own
-  // on-screen bounding box: dead center sends it straight back, away from
-  // the camera; the left/right edges of its silhouette send it straight
-  // sideways; in between sweeps smoothly across that back-facing semicircle.
-  flee(clickNDC) {
-    const box = new THREE.Box3().setFromObject(this.group);
-    const centerY = (box.min.y + box.max.y) / 2;
-    const centerZ = (box.min.z + box.max.z) / 2;
-    const leftNDC = new THREE.Vector3(box.min.x, centerY, centerZ).project(camera);
-    const rightNDC = new THREE.Vector3(box.max.x, centerY, centerZ).project(camera);
-    const anchorNDC = this.group.position.clone().project(camera);
+  // Darts directly away from wherever the click ray meets the ground, so it
+  // reacts to the click's full 2D position (left/right AND toward/away from
+  // the camera), not just which side of its silhouette was clicked. Using
+  // the ground point instead of the raw mesh hit point matters here: the
+  // chicken's body is a convex blob facing a fixed camera angle, so nearly
+  // every click lands on the same camera-facing hemisphere of the mesh --
+  // the mesh hit point barely moves with where you actually click on screen.
+  flee(groundClickPoint) {
+    const away = new THREE.Vector2(
+      this.group.position.x - groundClickPoint.x,
+      this.group.position.z - groundClickPoint.z
+    );
+    if (away.lengthSq() < 0.0001) {
+      const randomAngle = Math.random() * Math.PI * 2;
+      away.set(Math.sin(randomAngle), Math.cos(randomAngle));
+    } else {
+      away.normalize();
+    }
 
-    const halfWidthNDC = Math.max(0.0001, (rightNDC.x - leftNDC.x) / 2);
-    const normalizedX = THREE.MathUtils.clamp((clickNDC.x - anchorNDC.x) / halfWidthNDC, -1, 1);
-
-    const angle = -normalizedX * (Math.PI / 2);
-    const awayX = Math.sin(angle);
-    const awayZ = Math.cos(angle);
-
-    this.heading = angle;
+    this.heading = Math.atan2(away.x, away.y);
     this.group.rotation.y = this.heading;
     this.target = new THREE.Vector2(
-      THREE.MathUtils.clamp(this.group.position.x + awayX * FLEE_DISTANCE, -BOUNDS, BOUNDS),
-      THREE.MathUtils.clamp(this.group.position.z + awayZ * FLEE_DISTANCE, -BOUNDS, BOUNDS)
+      THREE.MathUtils.clamp(this.group.position.x + away.x * FLEE_DISTANCE, -BOUNDS, BOUNDS),
+      THREE.MathUtils.clamp(this.group.position.z + away.y * FLEE_DISTANCE, -BOUNDS, BOUNDS)
     );
     this.restTimer = 0;
     this.fleeBoostTimer = FLEE_BOOST_DURATION;
@@ -456,6 +456,8 @@ for (let i = 0; i < CHICKEN_COUNT; i++) {
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const groundClickPoint = new THREE.Vector3();
 
 renderer.domElement.addEventListener('click', (event) => {
   // Use the canvas's own bounding rect, not the window -- the game is
@@ -473,7 +475,14 @@ renderer.domElement.addEventListener('click', (event) => {
   if (intersects.length > 0) {
     let obj = intersects[0].object;
     while (obj && !obj.userData.chicken) obj = obj.parent;
-    if (obj) obj.userData.chicken.registerClick(pointer.clone());
+    if (obj) {
+      // Where the same click ray lands on the ground -- a far more useful
+      // "click position" than the raw mesh hit point (see flee() for why).
+      // Falls back to the mesh hit point on the rare chance the ray doesn't
+      // cross the ground plane (e.g. clicking a chicken already in flight).
+      const groundPoint = raycaster.ray.intersectPlane(groundPlane, groundClickPoint) || intersects[0].point;
+      obj.userData.chicken.registerClick(groundPoint);
+    }
   }
 });
 
