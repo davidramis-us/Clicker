@@ -218,6 +218,7 @@ class Chicken {
 
   registerClick() {
     if (this.state !== 'walk') return;
+    spawnEgg(this.group.position.x, this.group.position.z, this.heading);
     this.agitation = Math.min(this.agitationThreshold, this.agitation + this.agitationPerClick);
     this.flinchTimer = 0.25;
     if (this.agitation >= this.agitationThreshold) {
@@ -332,6 +333,36 @@ function lerpAngle(a, b, t) {
   return a + diff * t;
 }
 
+// ---------- Eggs ----------
+
+const EGG_POP_DURATION = 0.25;
+const eggGeometry = new THREE.SphereGeometry(0.16, 8, 6);
+eggGeometry.scale(0.8, 1.15, 0.8);
+const eggMaterial = new THREE.MeshStandardMaterial({ color: 0xfaf3df, flatShading: true });
+const eggs = [];
+
+function spawnEgg(x, z, heading) {
+  const egg = new THREE.Mesh(eggGeometry, eggMaterial);
+  const behind = 0.4;
+  egg.position.set(x - Math.sin(heading) * behind, 0.1, z - Math.cos(heading) * behind);
+  egg.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
+  egg.scale.setScalar(0.001);
+  egg.castShadow = true;
+  egg.receiveShadow = true;
+  scene.add(egg);
+  eggs.push({ mesh: egg, age: 0 });
+}
+
+function updateEggs(dt) {
+  for (const egg of eggs) {
+    if (egg.age >= EGG_POP_DURATION) continue;
+    egg.age += dt;
+    const t = Math.min(1, egg.age / EGG_POP_DURATION);
+    const eased = t * t * (3 - 2 * t);
+    egg.mesh.scale.setScalar(Math.max(0.001, eased));
+  }
+}
+
 // ---------- Spawn chickens ----------
 
 const chickenColors = [0xf5f0e6, 0x8b5a2b, 0x3a2a1a, 0xe8d9b5];
@@ -377,6 +408,7 @@ const clock = new THREE.Clock();
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   chickens.forEach((c) => c.update(dt));
+  updateEggs(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
