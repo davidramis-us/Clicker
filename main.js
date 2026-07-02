@@ -2,46 +2,49 @@ import * as THREE from 'three';
 
 // ---------- Renderer / Scene / Camera ----------
 
+const gameFrame = document.getElementById('game-frame');
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-document.body.appendChild(renderer.domElement);
+gameFrame.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const skyColor = 0xbfe8ff;
 scene.background = new THREE.Color(skyColor);
 scene.fog = new THREE.Fog(skyColor, 26, 50);
 
-// An orthographic camera keeps a fixed visible width in world units no
-// matter the aspect ratio, so the yard stays the same relative size on
-// screen whether the window is wide, narrow, or portrait -- only the
-// visible height changes, revealing more or less of the yard vertically.
+// The game keeps a fixed 3:4 portrait aspect ratio and is letterboxed to fit
+// inside the window rather than stretching to match whatever shape the
+// window happens to be. Since the aspect ratio never changes, the camera's
+// frustum and angle are fixed too -- no more adapting per resize.
+const GAME_ASPECT = 3 / 4;
 const ORTHO_HALF_WIDTH = 9;
-const camera = new THREE.OrthographicCamera(-ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH, -ORTHO_HALF_WIDTH, 0.1, 100);
-
-// The landscape framing looks at the yard from a shallow angle, which puts a
-// horizon partway up the screen. On a narrow/portrait screen that shallow
-// angle would waste some of the extra vertical room on empty sky above the
-// horizon, so the camera tips slightly steeper as the screen gets taller
-// than it is wide -- just enough to keep the horizon in check, while staying
-// a low, elevated view rather than a top-down one.
-const LANDSCAPE_CAMERA_POS = new THREE.Vector3(0, 15, 17);
-const PORTRAIT_CAMERA_POS = new THREE.Vector3(0, 17, 15);
+const ORTHO_HALF_HEIGHT = ORTHO_HALF_WIDTH / GAME_ASPECT;
+const camera = new THREE.OrthographicCamera(
+  -ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH,
+  ORTHO_HALF_HEIGHT, -ORTHO_HALF_HEIGHT,
+  0.1, 100
+);
+camera.position.set(0, 15, 17);
+camera.lookAt(0, 0, 0);
+camera.updateProjectionMatrix();
 
 function resize() {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
-  if (width === 0 || height === 0) return;
-  const aspect = width / height;
+  const windowWidth = window.innerWidth;
+  const windowHeight = window.innerHeight;
+  if (windowWidth === 0 || windowHeight === 0) return;
 
-  const portraitBlend = THREE.MathUtils.clamp((0.9 - aspect) / (0.9 - 0.45), 0, 1);
-  camera.position.lerpVectors(LANDSCAPE_CAMERA_POS, PORTRAIT_CAMERA_POS, portraitBlend);
-  camera.lookAt(0, 0, 0);
+  // Fit the fixed-aspect frame inside the window (contain, not cover).
+  let width = windowWidth;
+  let height = width / GAME_ASPECT;
+  if (height > windowHeight) {
+    height = windowHeight;
+    width = height * GAME_ASPECT;
+  }
 
-  const halfHeight = ORTHO_HALF_WIDTH / aspect;
-  camera.top = halfHeight;
-  camera.bottom = -halfHeight;
-  camera.updateProjectionMatrix();
+  gameFrame.style.width = `${width}px`;
+  gameFrame.style.height = `${height}px`;
   renderer.setSize(width, height);
 }
 
@@ -405,8 +408,11 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
 renderer.domElement.addEventListener('click', (event) => {
-  pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-  pointer.y = -(event.clientY / window.innerHeight) * 2 + 1;
+  // Use the canvas's own bounding rect, not the window -- the game is
+  // letterboxed inside a fixed-aspect frame, so it rarely fills the window.
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
   raycaster.setFromCamera(pointer, camera);
   const intersects = raycaster.intersectObjects(
