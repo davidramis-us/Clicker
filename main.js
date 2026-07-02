@@ -16,17 +16,17 @@ scene.fog = new THREE.Fog(skyColor, 26, 50);
 // matter the aspect ratio, so the yard stays the same relative size on
 // screen whether the window is wide, narrow, or portrait -- only the
 // visible height changes, revealing more or less of the yard vertically.
-const ORTHO_HALF_WIDTH = 12;
+const ORTHO_HALF_WIDTH = 9;
 const camera = new THREE.OrthographicCamera(-ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH, ORTHO_HALF_WIDTH, -ORTHO_HALF_WIDTH, 0.1, 100);
 
 // The landscape framing looks at the yard from a shallow angle, which puts a
 // horizon partway up the screen. On a narrow/portrait screen that shallow
-// angle would waste most of the extra vertical room on empty sky above the
-// horizon, so the camera tips toward looking straight down as the screen
-// gets taller than it is wide -- a top-down view has no horizon, so the
-// extra height reveals more yard instead.
+// angle would waste some of the extra vertical room on empty sky above the
+// horizon, so the camera tips slightly steeper as the screen gets taller
+// than it is wide -- just enough to keep the horizon in check, while staying
+// a low, elevated view rather than a top-down one.
 const LANDSCAPE_CAMERA_POS = new THREE.Vector3(0, 15, 17);
-const PORTRAIT_CAMERA_POS = new THREE.Vector3(0, 22, 5);
+const PORTRAIT_CAMERA_POS = new THREE.Vector3(0, 17, 15);
 
 function resize() {
   const width = window.innerWidth;
