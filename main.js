@@ -4,7 +4,6 @@ import * as THREE from 'three';
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 
@@ -13,20 +12,26 @@ const skyColor = 0xbfe8ff;
 scene.background = new THREE.Color(skyColor);
 scene.fog = new THREE.Fog(skyColor, 26, 50);
 
-const camera = new THREE.PerspectiveCamera(
-  32,
-  window.innerWidth / window.innerHeight,
-  0.1,
-  100
-);
+const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
 camera.position.set(0, 15, 17);
 camera.lookAt(0, 0, 0);
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+function resize() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  if (width === 0 || height === 0) return;
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-});
+  renderer.setSize(width, height);
+}
+
+// The viewport isn't always settled the instant this script runs, so a
+// single synchronous read of window.innerWidth/innerHeight can lock the
+// canvas at 0x0 with nothing left to correct it. Re-checking on the next
+// animation frame (after layout has definitely happened) fixes that.
+resize();
+requestAnimationFrame(resize);
+window.addEventListener('resize', resize);
 
 // ---------- Lights ----------
 
