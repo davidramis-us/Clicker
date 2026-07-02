@@ -20,19 +20,3 @@ html, body {
 canvas {
   display: block;
 }
-
-#hint {
-  position: absolute;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 14px;
-  pointer-events: none;
-  z-index: 10;
-  text-align: center;
-  width: 90%;
-}
