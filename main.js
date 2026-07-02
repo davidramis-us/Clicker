@@ -252,10 +252,10 @@ class Chicken {
     );
   }
 
-  registerClick(clickPoint) {
+  registerClick(clickNDC) {
     if (this.state !== 'walk') return;
     spawnEgg(this.group.position.x, this.group.position.z, this.heading);
-    this.flee(clickPoint);
+    this.flee(clickNDC);
     this.agitation = Math.min(this.agitationThreshold, this.agitation + this.agitationPerClick);
     this.flinchTimer = 0.25;
     if (this.agitation >= this.agitationThreshold) {
@@ -263,26 +263,30 @@ class Chicken {
     }
   }
 
-  // Darts away from wherever the click actually landed on its body, so
-  // clicking its left side sends it right and vice versa -- every click
-  // provokes this ground dash, independent of the agitation/flight buildup.
-  flee(clickPoint) {
-    const away = new THREE.Vector2(
-      this.group.position.x - clickPoint.x,
-      this.group.position.z - clickPoint.z
-    );
-    if (away.lengthSq() < 0.0001) {
-      const randomAngle = Math.random() * Math.PI * 2;
-      away.set(Math.sin(randomAngle), Math.cos(randomAngle));
-    } else {
-      away.normalize();
-    }
+  // Darts away based on where the click landed across the chicken's own
+  // on-screen bounding box: dead center sends it straight back, away from
+  // the camera; the left/right edges of its silhouette send it straight
+  // sideways; in between sweeps smoothly across that back-facing semicircle.
+  flee(clickNDC) {
+    const box = new THREE.Box3().setFromObject(this.group);
+    const centerY = (box.min.y + box.max.y) / 2;
+    const centerZ = (box.min.z + box.max.z) / 2;
+    const leftNDC = new THREE.Vector3(box.min.x, centerY, centerZ).project(camera);
+    const rightNDC = new THREE.Vector3(box.max.x, centerY, centerZ).project(camera);
+    const anchorNDC = this.group.position.clone().project(camera);
 
-    this.heading = Math.atan2(away.x, away.y);
+    const halfWidthNDC = Math.max(0.0001, (rightNDC.x - leftNDC.x) / 2);
+    const normalizedX = THREE.MathUtils.clamp((clickNDC.x - anchorNDC.x) / halfWidthNDC, -1, 1);
+
+    const angle = -normalizedX * (Math.PI / 2);
+    const awayX = Math.sin(angle);
+    const awayZ = Math.cos(angle);
+
+    this.heading = angle;
     this.group.rotation.y = this.heading;
     this.target = new THREE.Vector2(
-      THREE.MathUtils.clamp(this.group.position.x + away.x * FLEE_DISTANCE, -BOUNDS, BOUNDS),
-      THREE.MathUtils.clamp(this.group.position.z + away.y * FLEE_DISTANCE, -BOUNDS, BOUNDS)
+      THREE.MathUtils.clamp(this.group.position.x + awayX * FLEE_DISTANCE, -BOUNDS, BOUNDS),
+      THREE.MathUtils.clamp(this.group.position.z + awayZ * FLEE_DISTANCE, -BOUNDS, BOUNDS)
     );
     this.restTimer = 0;
     this.fleeBoostTimer = FLEE_BOOST_DURATION;
@@ -469,7 +473,7 @@ renderer.domElement.addEventListener('click', (event) => {
   if (intersects.length > 0) {
     let obj = intersects[0].object;
     while (obj && !obj.userData.chicken) obj = obj.parent;
-    if (obj) obj.userData.chicken.registerClick(intersects[0].point);
+    if (obj) obj.userData.chicken.registerClick(pointer.clone());
   }
 });
 
