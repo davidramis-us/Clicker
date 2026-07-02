@@ -26,7 +26,10 @@ const camera = new THREE.OrthographicCamera(
   ORTHO_HALF_HEIGHT, -ORTHO_HALF_HEIGHT,
   0.1, 100
 );
-camera.position.set(0, 15, 17);
+const CAMERA_DISTANCE = Math.hypot(15, 17); // keep the original distance/zoom
+const CAMERA_ELEVATION_DEG = 35;
+const elevationRad = THREE.MathUtils.degToRad(CAMERA_ELEVATION_DEG);
+camera.position.set(0, CAMERA_DISTANCE * Math.sin(elevationRad), CAMERA_DISTANCE * Math.cos(elevationRad));
 camera.lookAt(0, 0, 0);
 camera.updateProjectionMatrix();
 
