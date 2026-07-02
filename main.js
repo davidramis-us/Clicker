@@ -201,6 +201,7 @@ class Chicken {
     this.agitationPerClick = 1;
     this.agitationDecayPerSecond = 1.1;
     this.flinchTimer = 0;
+    this.preFlightLift = 1.7; // how high the agitation alone can hoist it before real flight kicks in
   }
 
   pickTarget() {
@@ -242,15 +243,20 @@ class Chicken {
       if (this.flinchTimer > 0) this.flinchTimer -= dt;
       const flinch = this.flinchTimer > 0 ? Math.sin((this.flinchTimer / 0.25) * Math.PI) : 0;
 
-      // gentle leg waddle, wings mostly folded, flared briefly on a flinch
+      // each click's agitation hoists it a bit higher; it sinks back only as
+      // agitation decays, so a burst of clicks visibly suspends it in the air
+      const lift = alertRatio * this.preFlightLift;
+
+      // gentle leg waddle, wings mostly folded, flared briefly on a flinch,
+      // raised more the higher it's being held up
       const swing = Math.sin(this.walkClock * this.speed * 6) * 0.35;
-      this.legs[0].rotation.x = swing;
-      this.legs[1].rotation.x = -swing;
+      this.legs[0].rotation.x = swing - alertRatio * 0.9;
+      this.legs[1].rotation.x = -swing - alertRatio * 0.9;
       this.wings.forEach(({ pivot, side }) => {
-        pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05 + flinch * 0.6);
+        pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05 + flinch * 0.6 + alertRatio * 0.5);
       });
-      // small body bob, plus a startled hop while flinching
-      this.group.position.y = Math.abs(Math.sin(this.walkClock * this.speed * 6)) * 0.05 + flinch * 0.2;
+      // small body bob, a startled hop while flinching, plus the sustained lift
+      this.group.position.y = Math.abs(Math.sin(this.walkClock * this.speed * 6)) * 0.05 + flinch * 0.2 + lift;
     } else {
       this.updateFlying(dt);
       // fast wing flap
