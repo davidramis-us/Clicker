@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" remote get-url origin)"
+    ]
+  }
+}
