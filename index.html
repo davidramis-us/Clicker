@@ -8,6 +8,47 @@
 </head>
 <body>
   <div id="frame-wrapper">
+    <div id="stats-frame">
+      <div class="stats-title">FARM MONITOR</div>
+      <div class="stats-live"><span class="stats-dot"></span>LIVE</div>
+      <div class="stats-divider"></div>
+
+      <div class="stats-section">// POPULATION</div>
+      <div class="stats-row">
+        <span class="stats-label">hens</span>
+        <span class="stats-value" id="stat-hens">0</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">in air</span>
+        <span class="stats-value" id="stat-flying">0</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">roosters</span>
+        <span class="stats-value" id="stat-roosters">0</span>
+      </div>
+
+      <div class="stats-spacer"></div>
+      <div class="stats-section">// EGGS</div>
+      <div class="stats-row">
+        <span class="stats-label">laid</span>
+        <span class="stats-value" id="stat-eggs-laid">0</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">swept</span>
+        <span class="stats-value" id="stat-eggs-swept">0</span>
+      </div>
+      <div class="stats-row">
+        <span class="stats-label">yield</span>
+        <span class="stats-value stats-pct" id="stat-eggs-pct">—</span>
+      </div>
+
+      <div class="stats-spacer"></div>
+      <div class="stats-section">// COMBAT</div>
+      <div class="stats-row">
+        <span class="stats-label">shots</span>
+        <span class="stats-value" id="stat-shots">0</span>
+      </div>
+    </div>
     <div id="game-frame"></div>
     <div id="pack-frame"></div>
   </div>

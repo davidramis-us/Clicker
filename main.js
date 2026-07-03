@@ -2,8 +2,9 @@ import * as THREE from 'three';
 
 // ---------- Renderer / Scene / Camera ----------
 
-const gameFrame = document.getElementById('game-frame');
-const packFrame = document.getElementById('pack-frame');
+const gameFrame  = document.getElementById('game-frame');
+const packFrame  = document.getElementById('pack-frame');
+const statsFrame = document.getElementById('stats-frame');
 
 const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setPixelRatio(0.275 * window.devicePixelRatio);
@@ -34,22 +35,32 @@ camera.position.set(0, CAMERA_DISTANCE * Math.sin(elevationRad), CAMERA_DISTANCE
 camera.lookAt(0, 0, 0);
 camera.updateProjectionMatrix();
 
+// ---------- Stats counters ----------
+
+let totalShots = 0;
+let eggsLaid   = 0;
+let eggsSwept  = 0;
+
 function resize() {
   const windowWidth = window.innerWidth;
   const windowHeight = window.innerHeight;
   if (windowWidth === 0 || windowHeight === 0) return;
 
-  // Combined layout is 4:4 (square): 3:4 farm + 1:4 pack panel.
-  // Fit the square inside the window using the smaller dimension.
-  const side = Math.min(windowWidth, windowHeight);
-  const gameW = Math.round(side * 0.75);
-  const packW = Math.round(side * 0.25);
+  // Layout: stats(1) + game+pack(6) = 7 parts wide, 6 parts tall (square game area).
+  // Shrink game+pack so the full 7-part layout fits within the window.
+  const side   = Math.min(Math.floor(windowWidth * 6 / 7), windowHeight);
+  const statsW = Math.round(side / 6);
+  const gameW  = Math.round(side * 0.75);
+  const packW  = Math.round(side * 0.25);
 
-  gameFrame.style.width = `${gameW}px`;
+  statsFrame.style.width  = `${statsW}px`;
+  statsFrame.style.height = `${side}px`;
+
+  gameFrame.style.width  = `${gameW}px`;
   gameFrame.style.height = `${side}px`;
   renderer.setSize(gameW, side);
 
-  packFrame.style.width = `${packW}px`;
+  packFrame.style.width  = `${packW}px`;
   packFrame.style.height = `${side}px`;
   packRenderer.setSize(packW, side);
 }
@@ -296,6 +307,7 @@ class Chicken {
 
   shootDown(hitPoint) {
     if (this.state !== 'fly' || this.flyStartTimer < 1) return;
+    totalShots++;
     this.state = 'falling';
 
     const cx = this.group.position.x;
@@ -562,6 +574,7 @@ const eggMaterial = new THREE.MeshStandardMaterial({ color: 0xfaf3df, flatShadin
 const eggs = [];
 
 function spawnEgg(x, z, heading) {
+  eggsLaid++;
   const egg = new THREE.Mesh(eggGeometry, eggMaterial);
   const behind = 0.4;
   egg.position.set(x - Math.sin(heading) * behind, 0.1, z - Math.cos(heading) * behind);
@@ -804,7 +817,8 @@ const packWeaveTex = new THREE.CanvasTexture(packWeaveCanvas);
 packWeaveTex.wrapS = packWeaveTex.wrapT = THREE.RepeatWrapping;
 packWeaveTex.magFilter = THREE.NearestFilter;
 packWeaveTex.minFilter = THREE.NearestFilter;
-packWeaveTex.repeat.set(4, 16); // ~4-5 effective pixels per weave cell
+// Table tile size = 0.5 × 0.5 world units (4 across 2.0 wide, 16 across 8.0 tall).
+packWeaveTex.repeat.set(4, 16);
 
 const packTableGeo = new THREE.PlaneGeometry(PACK_HALF_W * 2, PACK_HALF_H * 2);
 packTableGeo.rotateX(-Math.PI / 2);
@@ -826,56 +840,76 @@ edgeStrips.forEach(({ w, d, x, z }) => {
   packScene.add(m);
 });
 
-// Egg carton (2 cols × 6 rows = 12 slots, viewed from above)
+// 8 egg cartons in a 2×4 grid; each carton is 2×6 = 12 slots (96 total).
+const GRID_COLS    = 2;
+const GRID_ROWS    = 4;
 const CARTON_COLS  = 2;
 const CARTON_ROWS  = 6;
-const SLOT_SPACING = 0.38;
-const PACK_SLOT_R  = 0.13;
 
-// Dimensions computed first so position can reference them.
-const cartonW = (CARTON_COLS - 1) * SLOT_SPACING + PACK_SLOT_R * 2 + 0.14;
-const cartonH = (CARTON_ROWS - 1) * SLOT_SPACING + PACK_SLOT_R * 2 + 0.14;
+// Cell size — panel divided evenly into the grid.
+const CELL_W = (PACK_HALF_W * 2) / GRID_COLS;  // 1.0
+const CELL_H = (PACK_HALF_H * 2) / GRID_ROWS;  // 2.0
 
-// Justified to the bottom-left corner of the panel (world -X, +Z).
-const CARTON_CX = -(PACK_HALF_W - cartonW / 2 - 0.08);
-const CARTON_CZ =   PACK_HALF_H - cartonH / 2 - 0.08;
+// Scale slot spacing and radius to fit 6 rows in the cell height (with 0.08 margin).
+// Maintains original r/SS ≈ 0.342 so each carton looks proportionally identical.
+// Original: SS=0.38, r=0.13 → cartonH=2.30 which is too tall for a 2.0-unit cell.
+// New:      SS=0.30, r=0.10 → cartonH=1.84 fits with 0.08 margin per side.
+const SLOT_SPACING = 0.30;
+const PACK_SLOT_R  = 0.10;
+
+// Carton outer dimensions derived from slot geometry.
+const cartonW = (CARTON_COLS - 1) * SLOT_SPACING + PACK_SLOT_R * 2 + 0.14; // 0.64
+const cartonH = (CARTON_ROWS - 1) * SLOT_SPACING + PACK_SLOT_R * 2 + 0.14; // 1.84
 
 const cartonBaseMat = new THREE.MeshStandardMaterial({ color: 0xd4c48a, flatShading: true });
 const cartonWallMat = new THREE.MeshStandardMaterial({ color: 0xb8a870, flatShading: true });
-const WALL_H = 0.12;
+const WALL_H = 0.08;
 
-const cartonBase = new THREE.Mesh(new THREE.BoxGeometry(cartonW, 0.04, cartonH), cartonBaseMat);
-cartonBase.position.set(CARTON_CX, 0.02, CARTON_CZ);
-packScene.add(cartonBase);
-
-// Outer walls + centre column divider
-const sideWallGeo = new THREE.BoxGeometry(0.04, WALL_H, cartonH + 0.04);
-const endWallGeo  = new THREE.BoxGeometry(cartonW + 0.04, WALL_H, 0.04);
-[-1, 1].forEach(s => {
-  const sw = new THREE.Mesh(sideWallGeo, cartonWallMat);
-  sw.position.set(CARTON_CX + s * cartonW / 2, WALL_H / 2, CARTON_CZ);
-  packScene.add(sw);
-  const ew = new THREE.Mesh(endWallGeo, cartonWallMat);
-  ew.position.set(CARTON_CX, WALL_H / 2, CARTON_CZ + s * cartonH / 2);
-  packScene.add(ew);
-});
-const colDiv = new THREE.Mesh(new THREE.BoxGeometry(0.03, WALL_H, cartonH), cartonWallMat);
-colDiv.position.set(CARTON_CX, WALL_H / 2, CARTON_CZ);
-packScene.add(colDiv);
-
-// Slot indicators — shallow cylinders; material swaps to filled when an egg lands.
 const packSlots = [];
 const slotBaseMat   = new THREE.MeshStandardMaterial({ color: 0xc0aa68, flatShading: true });
 const slotFilledMat = new THREE.MeshStandardMaterial({ color: 0x8b7040, flatShading: true });
 const slotGeo = new THREE.CylinderGeometry(PACK_SLOT_R, PACK_SLOT_R * 0.85, 0.03, 8);
-for (let row = 0; row < CARTON_ROWS; row++) {
-  for (let col = 0; col < CARTON_COLS; col++) {
-    const sx = CARTON_CX + (col - (CARTON_COLS - 1) / 2) * SLOT_SPACING;
-    const sz = CARTON_CZ + (row - (CARTON_ROWS - 1) / 2) * SLOT_SPACING;
-    const sm = new THREE.Mesh(slotGeo, slotBaseMat);
-    sm.position.set(sx, 0.035, sz);
-    packScene.add(sm);
-    packSlots.push({ x: sx, z: sz, filled: false, mesh: sm });
+
+for (let gc = 0; gc < GRID_COLS; gc++) {
+  for (let gr = 0; gr < GRID_ROWS; gr++) {
+    const cx = -PACK_HALF_W + (gc + 0.5) * CELL_W;
+    const cz = -PACK_HALF_H + (gr + 0.5) * CELL_H;
+
+    // Carton base plate.
+    const base = new THREE.Mesh(new THREE.BoxGeometry(cartonW, 0.04, cartonH), cartonBaseMat);
+    base.position.set(cx, 0.02, cz);
+    packScene.add(base);
+
+    // Outer walls — thickness proportional to slot spacing.
+    const WT = SLOT_SPACING * 0.11;   // ≈ 0.033
+    const sideWallGeo = new THREE.BoxGeometry(WT, WALL_H, cartonH + WT);
+    const endWallGeo  = new THREE.BoxGeometry(cartonW + WT, WALL_H, WT);
+    [-1, 1].forEach(s => {
+      const sw = new THREE.Mesh(sideWallGeo, cartonWallMat);
+      sw.position.set(cx + s * cartonW / 2, WALL_H / 2, cz);
+      packScene.add(sw);
+      const ew = new THREE.Mesh(endWallGeo, cartonWallMat);
+      ew.position.set(cx, WALL_H / 2, cz + s * cartonH / 2);
+      packScene.add(ew);
+    });
+
+    // Centre column divider only — no row dividers (matches original single-carton design).
+    const colDiv = new THREE.Mesh(
+      new THREE.BoxGeometry(SLOT_SPACING * 0.07, WALL_H, cartonH), cartonWallMat);
+    colDiv.position.set(cx, WALL_H / 2, cz);
+    packScene.add(colDiv);
+
+    // Egg slots.
+    for (let row = 0; row < CARTON_ROWS; row++) {
+      for (let col = 0; col < CARTON_COLS; col++) {
+        const sx = cx + (col - (CARTON_COLS - 1) / 2) * SLOT_SPACING;
+        const sz = cz + (row - (CARTON_ROWS - 1) / 2) * SLOT_SPACING;
+        const sm = new THREE.Mesh(slotGeo, slotBaseMat);
+        sm.position.set(sx, 0.035, sz);
+        packScene.add(sm);
+        packSlots.push({ x: sx, z: sz, filled: false, mesh: sm });
+      }
+    }
   }
 }
 
@@ -890,12 +924,15 @@ const packEggs = [];
 // farmZ   — world-Z of the egg when it exited the farm (for screen-Y alignment)
 // farmVx/Vz — velocity at exit, carried into the pack scene
 function transferEggToPack(farmZ, farmVx, farmVz) {
+  eggsSwept++;
   if (packSlots.every(s => s.filled)) return;
   const m = new THREE.Mesh(eggGeometry, eggMaterial);
-  // Map farm Z → pack Z using the same scale ratio as the two cameras share in
-  // screen height, so the egg appears at the same vertical screen position.
+  // Farm camera is elevated at elevationRad, so world-Z maps to screen-Y via sin(elevation).
+  // Pack camera is top-down, so screen-Y maps directly to world-Z.
+  // Match NDC-Y: packZ = (farmZ·sin − egg_y·cos) · PACK_HALF_H / ORTHO_HALF_HEIGHT
+  const EGG_Y = 0.1;
   const entryZ = THREE.MathUtils.clamp(
-    farmZ * PACK_HALF_H / ORTHO_HALF_HEIGHT,
+    (farmZ * Math.sin(elevationRad) - EGG_Y * Math.cos(elevationRad)) * PACK_HALF_H / ORTHO_HALF_HEIGHT,
     -PACK_HALF_H + 0.15, PACK_HALF_H - 0.15
   );
   m.position.set(-PACK_HALF_W + 0.15, 0.1, entryZ);
@@ -1352,6 +1389,45 @@ renderer.domElement.addEventListener('mouseup', () => {
   rake.group.visible = false;
 });
 
+// ---------- Stats panel update ----------
+
+const prevStatValues = {};
+
+function flashStat(el) {
+  el.style.color = '#e8e847';
+  setTimeout(() => { el.style.color = ''; }, 50);
+}
+
+function setStat(id, value) {
+  const str = String(value);
+  if (prevStatValues[id] === str) return;
+  prevStatValues[id] = str;
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = str;
+  flashStat(el);
+}
+
+let statsTick = 0;
+function updateStatsPanel(dt) {
+  statsTick += dt;
+  if (statsTick < 0.2) return;
+  statsTick = 0;
+
+  const hens     = chickens.filter(c => c.canLayEggs).length;
+  const flying   = chickens.filter(c => c.state === 'fly').length;
+  const roosters = chickens.filter(c => !c.canLayEggs).length;
+  const pct      = eggsLaid > 0 ? ((eggsSwept / eggsLaid) * 100).toFixed(1) + '%' : '—';
+
+  setStat('stat-hens',       hens);
+  setStat('stat-flying',     flying);
+  setStat('stat-roosters',   roosters);
+  setStat('stat-eggs-laid',  eggsLaid);
+  setStat('stat-eggs-swept', eggsSwept);
+  setStat('stat-eggs-pct',   pct);
+  setStat('stat-shots',      totalShots);
+}
+
 // ---------- Animation loop ----------
 
 const clock = new THREE.Clock();
@@ -1364,6 +1440,7 @@ function animate() {
   if (raking) applyRakeCollision();
   updatePackEggs(dt);
   updateGloveAnimation(dt);
+  updateStatsPanel(dt);
   renderer.render(scene, camera);
   packRenderer.render(packScene, packCamera);
   requestAnimationFrame(animate);

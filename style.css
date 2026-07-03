@@ -22,6 +22,97 @@ html, body {
   position: relative;
 }
 
+/* ── Stats panel ─────────────────────────────────── */
+#stats-frame {
+  background: #1e1e1e;
+  font-family: 'Consolas', 'Courier New', monospace;
+  padding: 10px 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border-right: 1px solid #2a2a2a;
+  box-sizing: border-box;
+}
+
+.stats-title {
+  color: #569cd6;
+  font-size: clamp(8px, 0.65vw, 11px);
+  font-weight: bold;
+  letter-spacing: 0.12em;
+  text-align: center;
+  margin-bottom: 2px;
+}
+
+.stats-live {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #4a4a4a;
+  font-size: clamp(7px, 0.55vw, 9px);
+  letter-spacing: 0.1em;
+  margin-bottom: 2px;
+}
+
+.stats-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #4ec9b0;
+  animation: dotBlink 1.4s ease-in-out infinite;
+}
+
+@keyframes dotBlink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.15; }
+}
+
+.stats-divider {
+  border-top: 1px solid #2d2d2d;
+  margin: 3px 0;
+}
+
+.stats-spacer {
+  height: 5px;
+}
+
+.stats-section {
+  color: #6a9955;
+  font-size: clamp(7px, 0.55vw, 9px);
+  letter-spacing: 0.04em;
+  margin-top: 1px;
+  margin-bottom: 2px;
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 1px 3px;
+}
+
+.stats-label {
+  color: #9cdcfe;
+  font-size: clamp(8px, 0.62vw, 11px);
+  white-space: nowrap;
+}
+
+.stats-value {
+  color: #b5cea8;
+  font-size: clamp(8px, 0.62vw, 11px);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  transition: color 0.45s ease-out;
+}
+
+.stats-pct {
+  color: #ce9178;
+}
+
 canvas {
   display: block;
   image-rendering: pixelated;
