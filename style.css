@@ -11,10 +11,15 @@ html, body {
   justify-content: center;
 }
 
-/* Fixed-aspect game area; sized in JS to fit the window without stretching. */
-#game-frame {
-  position: relative;
+/* Both panels sit flush side-by-side; shadow on the combined wrapper. */
+#frame-wrapper {
+  display: flex;
+  align-items: stretch;
   box-shadow: 0 0 40px rgba(0, 0, 0, 0.6);
+}
+
+#game-frame, #pack-frame {
+  position: relative;
 }
 
 canvas {

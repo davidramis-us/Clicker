@@ -4,7 +4,9 @@
       "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" remote get-url origin)",
       "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" status)",
       "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" log --oneline -5)",
-      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" ls-files vendor/)"
+      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" ls-files vendor/)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\GENERAL\\\\Documents\\\\Projects\\\\Threejs\\\\Clicker\" -Recurse -Include \"*.js\", \"*.ts\")",
+      "Bash(Select-Object FullName)"
     ]
   }
 }

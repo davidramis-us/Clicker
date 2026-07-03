@@ -3,11 +3,16 @@ import * as THREE from 'three';
 // ---------- Renderer / Scene / Camera ----------
 
 const gameFrame = document.getElementById('game-frame');
+const packFrame = document.getElementById('pack-frame');
 
 const renderer = new THREE.WebGLRenderer({ antialias: false });
 renderer.setPixelRatio(0.275 * window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 gameFrame.appendChild(renderer.domElement);
+
+const packRenderer = new THREE.WebGLRenderer({ antialias: false });
+packRenderer.setPixelRatio(0.275 * window.devicePixelRatio);
+packFrame.appendChild(packRenderer.domElement);
 
 const scene = new THREE.Scene();
 const skyColor = 0xbfe8ff;
@@ -34,16 +39,19 @@ function resize() {
   const windowHeight = window.innerHeight;
   if (windowWidth === 0 || windowHeight === 0) return;
 
-  let width = windowWidth;
-  let height = width / GAME_ASPECT;
-  if (height > windowHeight) {
-    height = windowHeight;
-    width = height * GAME_ASPECT;
-  }
+  // Combined layout is 4:4 (square): 3:4 farm + 1:4 pack panel.
+  // Fit the square inside the window using the smaller dimension.
+  const side = Math.min(windowWidth, windowHeight);
+  const gameW = Math.round(side * 0.75);
+  const packW = Math.round(side * 0.25);
 
-  gameFrame.style.width = `${width}px`;
-  gameFrame.style.height = `${height}px`;
-  renderer.setSize(width, height);
+  gameFrame.style.width = `${gameW}px`;
+  gameFrame.style.height = `${side}px`;
+  renderer.setSize(gameW, side);
+
+  packFrame.style.width = `${packW}px`;
+  packFrame.style.height = `${side}px`;
+  packRenderer.setSize(packW, side);
 }
 
 resize();
@@ -124,14 +132,14 @@ const FLEE_SPEED_MULTIPLIER = 2.4;
 const FLEE_BOOST_DURATION = 0.9;
 
 class Chicken {
-  constructor(bodyColor) {
+  constructor(bodyColor, accentColor = null) {
     this.group = new THREE.Group();
     this.group.userData.chicken = this;
 
     const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, flatShading: true });
-    const beakMat = new THREE.MeshStandardMaterial({ color: 0xf2a53c, flatShading: true });
-    const combMat = new THREE.MeshStandardMaterial({ color: 0xd6392b, flatShading: true });
-    const legMat = new THREE.MeshStandardMaterial({ color: 0xf2a53c, flatShading: true });
+    const beakMat = new THREE.MeshStandardMaterial({ color: accentColor ?? 0xf2a53c, flatShading: true });
+    const combMat = new THREE.MeshStandardMaterial({ color: accentColor ?? 0xd6392b, flatShading: true });
+    const legMat = new THREE.MeshStandardMaterial({ color: accentColor ?? 0xf2a53c, flatShading: true });
 
     const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 0), bodyMat);
     body.scale.set(1, 0.9, 1.3);
@@ -227,6 +235,7 @@ class Chicken {
     this.spinZ = 0;
     this.stunTimer = 0;
     this.bloodDripTimer = 0;
+    this.canLayEggs = true;
   }
 
   pickTarget() {
@@ -238,7 +247,7 @@ class Chicken {
 
   registerClick(hitPoint) {
     if (this.state !== 'walk') return;
-    if (this.agitation < this.liftStartAgitation) {
+    if (this.agitation < this.liftStartAgitation && this.canLayEggs) {
       spawnEgg(this.group.position.x, this.group.position.z, this.heading);
     }
     this.flee(hitPoint);
@@ -448,13 +457,18 @@ class Chicken {
       this.stunTimer = 2.5;
       this.group.rotation.x = Math.PI / 2;
       this.group.rotation.z = 0;
-      spawnEgg(this.group.position.x, this.group.position.z, this.heading);
+      if (this.canLayEggs) spawnEgg(this.group.position.x, this.group.position.z, this.heading);
     }
   }
 
   updateStunned(dt) {
     this.stunTimer -= dt;
     if (this.stunTimer <= 0) {
+      if (!this.canLayEggs) {
+        scene.remove(this.group);
+        chickens.splice(chickens.indexOf(this), 1);
+        return;
+      }
       this.state = 'walk';
       this.group.rotation.x = 0;
       this.group.rotation.z = 0;
@@ -540,6 +554,8 @@ function updateBlood(dt) {
 // ---------- Eggs ----------
 
 const EGG_POP_DURATION = 0.25;
+const EGG_HATCH_TIME = 30; // seconds until an unswept egg hatches into a new hen
+const EGG_WOBBLE_START = 20; // seconds at which hatching wobble begins
 const eggGeometry = new THREE.SphereGeometry(0.16, 8, 6);
 eggGeometry.scale(0.8, 1.15, 0.8);
 const eggMaterial = new THREE.MeshStandardMaterial({ color: 0xfaf3df, flatShading: true });
@@ -557,6 +573,15 @@ function spawnEgg(x, z, heading) {
   eggs.push({ mesh: egg, age: 0, vx: 0, vz: 0 });
 }
 
+function hatchEgg(egg) {
+  scene.remove(egg.mesh);
+  const chick = new Chicken(0xffffff, 0xff6a00);
+  chick.canLayEggs = false;
+  chick.group.position.set(egg.mesh.position.x, 0, egg.mesh.position.z);
+  scene.add(chick.group);
+  chickens.push(chick);
+}
+
 const EGG_RADIUS = 0.13;
 const EGG_REMOVE_DIST = BOUNDS + 5;
 
@@ -570,6 +595,18 @@ function updateEggs(dt) {
       egg.mesh.scale.setScalar(Math.max(0.001, t * t * (3 - 2 * t)));
       continue;
     }
+    egg.age += dt;
+    if (egg.age >= EGG_HATCH_TIME) {
+      hatchEgg(egg);
+      eggs.splice(i, 1);
+      continue;
+    }
+    // Wobble the egg as it nears hatching (last 10 seconds, intensifying toward hatch)
+    if (egg.age > EGG_WOBBLE_START) {
+      const progress = (egg.age - EGG_WOBBLE_START) / (EGG_HATCH_TIME - EGG_WOBBLE_START);
+      const wobble = Math.sin(egg.age * (8 + progress * 14)) * progress * 0.4;
+      egg.mesh.rotation.z = wobble;
+    }
     egg.vx *= friction;
     egg.vz *= friction;
     egg.mesh.position.x += egg.vx * dt;
@@ -579,8 +616,14 @@ function updateEggs(dt) {
       egg.mesh.rotation.z -= egg.vx * dt * 2.5;
       egg.mesh.rotation.x += egg.vz * dt * 2.5;
     }
-    if (Math.abs(egg.mesh.position.x) > EGG_REMOVE_DIST ||
-        Math.abs(egg.mesh.position.z) > EGG_REMOVE_DIST) {
+    const ex = egg.mesh.position.x;
+    const ez = egg.mesh.position.z;
+    if (ex > ORTHO_HALF_WIDTH + 0.3) {
+      // Egg crossed the right screen edge — hand it off to the packing table.
+      transferEggToPack(ez, egg.vx, egg.vz);
+      scene.remove(egg.mesh);
+      eggs.splice(i, 1);
+    } else if (ex < -EGG_REMOVE_DIST || Math.abs(ez) > EGG_REMOVE_DIST) {
       scene.remove(egg.mesh);
       eggs.splice(i, 1);
     }
@@ -715,6 +758,397 @@ function applyRakeCollision() {
     }
   }
 }
+
+// ---------- Packing table ----------
+// Separate top-down scene rendered into the 1:4 right panel.
+// Camera up = world -Z  →  screen-top = world -Z, screen-bottom = world +Z.
+// Eggs enter from the left edge (x ≈ -PACK_HALF_W) and simulated gravity
+// pulls them toward +Z where the egg carton sits.
+
+const PACK_HALF_W = 1.0;
+const PACK_HALF_H = 4.0;
+
+const packScene = new THREE.Scene();
+packScene.background = new THREE.Color(0x222222);
+
+const packCamera = new THREE.OrthographicCamera(
+  -PACK_HALF_W, PACK_HALF_W,
+  PACK_HALF_H, -PACK_HALF_H,
+  0.1, 100
+);
+packCamera.position.set(0, 20, 0);
+packCamera.up.set(0, 0, -1);
+packCamera.lookAt(new THREE.Vector3(0, 0, 0));
+packCamera.updateProjectionMatrix();
+
+packScene.add(new THREE.AmbientLight(0xffffff, 0.85));
+const packSun = new THREE.DirectionalLight(0xffffff, 0.7);
+packSun.position.set(3, 10, -2);
+packScene.add(packSun);
+// Metal table — woven halftone pattern baked into a small canvas,
+// tiled with NearestFilter to stay crisp at the pixelated render scale.
+const packWeaveCanvas = document.createElement('canvas');
+packWeaveCanvas.width = packWeaveCanvas.height = 8;
+{
+  const wc = packWeaveCanvas.getContext('2d');
+  wc.fillStyle = '#c4c4c4';
+  wc.fillRect(0, 0, 8, 8);
+  // Staggered 2×2 dark blocks — basket-weave when tiled
+  wc.fillStyle = '#969696';
+  for (let y = 0; y < 8; y += 2) {
+    const xStart = (y / 2) % 2 === 0 ? 0 : 2;
+    for (let x = xStart; x < 8; x += 4) wc.fillRect(x, y, 2, 2);
+  }
+}
+const packWeaveTex = new THREE.CanvasTexture(packWeaveCanvas);
+packWeaveTex.wrapS = packWeaveTex.wrapT = THREE.RepeatWrapping;
+packWeaveTex.magFilter = THREE.NearestFilter;
+packWeaveTex.minFilter = THREE.NearestFilter;
+packWeaveTex.repeat.set(4, 16); // ~4-5 effective pixels per weave cell
+
+const packTableGeo = new THREE.PlaneGeometry(PACK_HALF_W * 2, PACK_HALF_H * 2);
+packTableGeo.rotateX(-Math.PI / 2);
+packScene.add(new THREE.Mesh(packTableGeo, new THREE.MeshStandardMaterial({
+  map: packWeaveTex, metalness: 0.55, roughness: 0.35,
+})));
+
+// Thin metal edge strips that frame the table
+const edgeMat = new THREE.MeshStandardMaterial({ color: 0x9a9a9a, metalness: 0.9, roughness: 0.1 });
+const edgeStrips = [
+  { w: PACK_HALF_W * 2, d: 0.04, x: 0, z: -PACK_HALF_H },
+  { w: PACK_HALF_W * 2, d: 0.04, x: 0, z:  PACK_HALF_H },
+  { w: 0.04, d: PACK_HALF_H * 2, x: -PACK_HALF_W, z: 0 },
+  { w: 0.04, d: PACK_HALF_H * 2, x:  PACK_HALF_W, z: 0 },
+];
+edgeStrips.forEach(({ w, d, x, z }) => {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.06, d), edgeMat);
+  m.position.set(x, 0.03, z);
+  packScene.add(m);
+});
+
+// Egg carton (2 cols × 6 rows = 12 slots, viewed from above)
+const CARTON_COLS  = 2;
+const CARTON_ROWS  = 6;
+const SLOT_SPACING = 0.38;
+const PACK_SLOT_R  = 0.13;
+
+// Dimensions computed first so position can reference them.
+const cartonW = (CARTON_COLS - 1) * SLOT_SPACING + PACK_SLOT_R * 2 + 0.14;
+const cartonH = (CARTON_ROWS - 1) * SLOT_SPACING + PACK_SLOT_R * 2 + 0.14;
+
+// Justified to the bottom-left corner of the panel (world -X, +Z).
+const CARTON_CX = -(PACK_HALF_W - cartonW / 2 - 0.08);
+const CARTON_CZ =   PACK_HALF_H - cartonH / 2 - 0.08;
+
+const cartonBaseMat = new THREE.MeshStandardMaterial({ color: 0xd4c48a, flatShading: true });
+const cartonWallMat = new THREE.MeshStandardMaterial({ color: 0xb8a870, flatShading: true });
+const WALL_H = 0.12;
+
+const cartonBase = new THREE.Mesh(new THREE.BoxGeometry(cartonW, 0.04, cartonH), cartonBaseMat);
+cartonBase.position.set(CARTON_CX, 0.02, CARTON_CZ);
+packScene.add(cartonBase);
+
+// Outer walls + centre column divider
+const sideWallGeo = new THREE.BoxGeometry(0.04, WALL_H, cartonH + 0.04);
+const endWallGeo  = new THREE.BoxGeometry(cartonW + 0.04, WALL_H, 0.04);
+[-1, 1].forEach(s => {
+  const sw = new THREE.Mesh(sideWallGeo, cartonWallMat);
+  sw.position.set(CARTON_CX + s * cartonW / 2, WALL_H / 2, CARTON_CZ);
+  packScene.add(sw);
+  const ew = new THREE.Mesh(endWallGeo, cartonWallMat);
+  ew.position.set(CARTON_CX, WALL_H / 2, CARTON_CZ + s * cartonH / 2);
+  packScene.add(ew);
+});
+const colDiv = new THREE.Mesh(new THREE.BoxGeometry(0.03, WALL_H, cartonH), cartonWallMat);
+colDiv.position.set(CARTON_CX, WALL_H / 2, CARTON_CZ);
+packScene.add(colDiv);
+
+// Slot indicators — shallow cylinders; material swaps to filled when an egg lands.
+const packSlots = [];
+const slotBaseMat   = new THREE.MeshStandardMaterial({ color: 0xc0aa68, flatShading: true });
+const slotFilledMat = new THREE.MeshStandardMaterial({ color: 0x8b7040, flatShading: true });
+const slotGeo = new THREE.CylinderGeometry(PACK_SLOT_R, PACK_SLOT_R * 0.85, 0.03, 8);
+for (let row = 0; row < CARTON_ROWS; row++) {
+  for (let col = 0; col < CARTON_COLS; col++) {
+    const sx = CARTON_CX + (col - (CARTON_COLS - 1) / 2) * SLOT_SPACING;
+    const sz = CARTON_CZ + (row - (CARTON_ROWS - 1) / 2) * SLOT_SPACING;
+    const sm = new THREE.Mesh(slotGeo, slotBaseMat);
+    sm.position.set(sx, 0.035, sz);
+    packScene.add(sm);
+    packSlots.push({ x: sx, z: sz, filled: false, mesh: sm });
+  }
+}
+
+// Pack egg physics constants
+const PACK_GRAVITY      = 1.0;  // gentle slope pull
+const PACK_ATTRACT_DIST = 0.18; // only attracts when almost on top of a slot
+const PACK_ATTRACT_STR  = 1.8;  // gentle nudge, not a magnet
+const PACK_SNAP_DIST    = 0.12;
+const PACK_EGG_DIAM     = 0.22;
+const packEggs = [];
+
+// farmZ   — world-Z of the egg when it exited the farm (for screen-Y alignment)
+// farmVx/Vz — velocity at exit, carried into the pack scene
+function transferEggToPack(farmZ, farmVx, farmVz) {
+  if (packSlots.every(s => s.filled)) return;
+  const m = new THREE.Mesh(eggGeometry, eggMaterial);
+  // Map farm Z → pack Z using the same scale ratio as the two cameras share in
+  // screen height, so the egg appears at the same vertical screen position.
+  const entryZ = THREE.MathUtils.clamp(
+    farmZ * PACK_HALF_H / ORTHO_HALF_HEIGHT,
+    -PACK_HALF_H + 0.15, PACK_HALF_H - 0.15
+  );
+  m.position.set(-PACK_HALF_W + 0.15, 0.1, entryZ);
+  m.rotation.set((Math.random() - 0.5) * 0.3, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.3);
+  packScene.add(m);
+  // Carry rightward push from the rake; dampen Z so the egg doesn't shoot off.
+  packEggs.push({
+    mesh: m,
+    vx: Math.max(0.3, farmVx * 0.18),
+    vz: farmVz * 0.15,
+    settled: false,
+    held: false,
+    slot: null,
+  });
+}
+
+function updatePackEggs(dt) {
+  const packFriction = Math.pow(0.1, dt); // uniform rolling friction
+
+  for (let i = packEggs.length - 1; i >= 0; i--) {
+    const egg = packEggs[i];
+    if (egg.settled || egg.held) continue;
+
+    // Gravity toward bottom of screen (+Z direction)
+    egg.vz += PACK_GRAVITY * dt;
+
+    // Attract toward nearest unfilled slot
+    let nearest = null;
+    let nearestDist = Infinity;
+    for (const slot of packSlots) {
+      if (slot.filled) continue;
+      const dx = slot.x - egg.mesh.position.x;
+      const dz = slot.z - egg.mesh.position.z;
+      const d = Math.sqrt(dx * dx + dz * dz);
+      if (d < nearestDist) { nearestDist = d; nearest = slot; }
+    }
+    if (nearest && nearestDist < PACK_ATTRACT_DIST) {
+      const dx = nearest.x - egg.mesh.position.x;
+      const dz = nearest.z - egg.mesh.position.z;
+      egg.vx += (dx / nearestDist) * PACK_ATTRACT_STR * dt;
+      egg.vz += (dz / nearestDist) * PACK_ATTRACT_STR * dt;
+    }
+
+    // Snap into slot
+    if (nearest && nearestDist < PACK_SNAP_DIST) {
+      egg.mesh.position.set(nearest.x, 0.14, nearest.z);
+      egg.mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+      egg.vx = 0; egg.vz = 0;
+      nearest.filled = true;
+      nearest.mesh.material = slotFilledMat;
+      egg.settled = true;
+      egg.slot = nearest;
+      continue;
+    }
+
+    egg.vx *= packFriction;
+    egg.vz *= packFriction;
+
+    egg.mesh.position.x += egg.vx * dt;
+    egg.mesh.position.z += egg.vz * dt;
+
+    // Visual roll
+    const spd = Math.sqrt(egg.vx * egg.vx + egg.vz * egg.vz);
+    if (spd > 0.05) {
+      egg.mesh.rotation.z -= egg.vx * dt * 2.5;
+      egg.mesh.rotation.x += egg.vz * dt * 2.5;
+    }
+
+    // Table boundary bounce
+    const bx = PACK_HALF_W - 0.13;
+    const bz = PACK_HALF_H - 0.13;
+    if (Math.abs(egg.mesh.position.x) > bx) {
+      egg.mesh.position.x = Math.sign(egg.mesh.position.x) * bx;
+      egg.vx *= -0.4;
+    }
+    if (egg.mesh.position.z < -bz) { egg.mesh.position.z = -bz; egg.vz *= -0.4; }
+    if (egg.mesh.position.z >  bz) { egg.mesh.position.z =  bz; egg.vz *= -0.4; }
+  }
+
+  // Pack egg-egg collision
+  for (let i = 0; i < packEggs.length; i++) {
+    if (packEggs[i].settled || packEggs[i].held) continue;
+    for (let j = i + 1; j < packEggs.length; j++) {
+      if (packEggs[j].settled || packEggs[j].held) continue;
+      const dx = packEggs[j].mesh.position.x - packEggs[i].mesh.position.x;
+      const dz = packEggs[j].mesh.position.z - packEggs[i].mesh.position.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq < PACK_EGG_DIAM * PACK_EGG_DIAM && distSq > 0.0001) {
+        const dist = Math.sqrt(distSq);
+        const overlap = PACK_EGG_DIAM - dist;
+        const nx = dx / dist, nz = dz / dist;
+        const imp = overlap * 8;
+        packEggs[i].vx -= nx * imp; packEggs[i].vz -= nz * imp;
+        packEggs[j].vx += nx * imp; packEggs[j].vz += nz * imp;
+      }
+    }
+  }
+}
+
+// ---------- Pack table — glove hand interaction ----------
+
+const packRaycaster  = new THREE.Raycaster();
+const packPointer    = new THREE.Vector2();
+const packGroundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const packWorldPoint  = new THREE.Vector3();
+let heldPackEgg     = null;
+let hoveredPackEgg  = null;
+
+// Glove cursor — floats over the pack canvas like the bullseye over the farm.
+const gloveEl = document.createElement('div');
+Object.assign(gloveEl.style, {
+  display: 'none',
+  position: 'absolute',
+  transform: 'translate(-50%, -48%)',
+  pointerEvents: 'none',
+  zIndex: '10',
+  color: '#e8d44d',          // yellow rubber glove
+  filter: 'drop-shadow(0 2px 3px rgba(0,0,0,0.55))',
+});
+packFrame.appendChild(gloveEl);
+
+// Open hand (hovering) — fingers spread, ready to grab.
+const GLOVE_OPEN = `<svg viewBox="0 0 38 50" width="34" height="46">
+  <rect x="1"  y="4"  width="8" height="22" rx="4" fill="currentColor"/>
+  <rect x="11" y="2"  width="8" height="24" rx="4" fill="currentColor"/>
+  <rect x="21" y="2"  width="8" height="24" rx="4" fill="currentColor"/>
+  <rect x="30" y="6"  width="7" height="20" rx="3.5" fill="currentColor"/>
+  <rect x="1"  y="20" width="36" height="18" rx="7" fill="currentColor"/>
+  <rect x="5"  y="33" width="28" height="17" rx="5" fill="currentColor"/>
+  <rect x="7"  y="35" width="24" height="3"  rx="1.5" fill="white" opacity="0.22"/>
+</svg>`;
+
+// Closed fist (holding) — knuckles up, thumb wrapped around.
+const GLOVE_CLOSED = `<svg viewBox="0 0 38 46" width="34" height="42">
+  <rect x="1"  y="2"  width="8" height="13" rx="4" fill="currentColor"/>
+  <rect x="11" y="0"  width="8" height="15" rx="4" fill="currentColor"/>
+  <rect x="21" y="2"  width="8" height="13" rx="4" fill="currentColor"/>
+  <rect x="30" y="5"  width="7" height="10" rx="3.5" fill="currentColor"/>
+  <rect x="1"  y="11" width="36" height="15" rx="7" fill="currentColor"/>
+  <rect x="1"  y="19" width="12" height="8"  rx="4" fill="currentColor"/>
+  <rect x="5"  y="22" width="28" height="17" rx="5" fill="currentColor"/>
+  <rect x="7"  y="24" width="24" height="3"  rx="1.5" fill="white" opacity="0.22"/>
+</svg>`;
+
+function updateGlovePos(event) {
+  const fr = packFrame.getBoundingClientRect();
+  gloveEl.style.left = `${event.clientX - fr.left}px`;
+  gloveEl.style.top  = `${event.clientY - fr.top}px`;
+}
+
+packRenderer.domElement.addEventListener('mousemove', (event) => {
+  const rect = packRenderer.domElement.getBoundingClientRect();
+  packPointer.x = ((event.clientX - rect.left) / rect.width)  * 2 - 1;
+  packPointer.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
+  packRaycaster.setFromCamera(packPointer, packCamera);
+
+  if (heldPackEgg) {
+    // Drag held egg to cursor world position.
+    if (packRaycaster.ray.intersectPlane(packGroundPlane, packWorldPoint)) {
+      const bx = PACK_HALF_W - 0.15, bz = PACK_HALF_H - 0.15;
+      heldPackEgg.mesh.position.x = THREE.MathUtils.clamp(packWorldPoint.x, -bx, bx);
+      heldPackEgg.mesh.position.z = THREE.MathUtils.clamp(packWorldPoint.z, -bz, bz);
+      heldPackEgg.mesh.position.y = 0.28; // lifted slightly
+    }
+    updateGlovePos(event);
+    return;
+  }
+
+  // Check hover over any pack egg.
+  const meshes = packEggs.map(e => e.mesh);
+  const hits = meshes.length ? packRaycaster.intersectObjects(meshes) : [];
+  if (hits.length > 0) {
+    hoveredPackEgg = packEggs.find(e => e.mesh === hits[0].object) || null;
+    gloveEl.innerHTML = GLOVE_OPEN;
+    gloveEl.style.display = 'block';
+    packRenderer.domElement.style.cursor = 'none';
+    updateGlovePos(event);
+  } else {
+    hoveredPackEgg = null;
+    gloveEl.style.display = 'none';
+    packRenderer.domElement.style.cursor = '';
+  }
+});
+
+packRenderer.domElement.addEventListener('mouseleave', () => {
+  if (!heldPackEgg) {
+    hoveredPackEgg = null;
+    gloveEl.style.display = 'none';
+    packRenderer.domElement.style.cursor = '';
+  }
+});
+
+packRenderer.domElement.addEventListener('mousedown', () => {
+  if (!hoveredPackEgg) return;
+  heldPackEgg = hoveredPackEgg;
+  hoveredPackEgg = null;
+  // If the egg was settled in a slot, free that slot.
+  if (heldPackEgg.slot) {
+    heldPackEgg.slot.filled = false;
+    heldPackEgg.slot.mesh.material = slotBaseMat;
+    heldPackEgg.slot = null;
+  }
+  heldPackEgg.settled = false;
+  heldPackEgg.held = true;
+  heldPackEgg.vx = 0;
+  heldPackEgg.vz = 0;
+  gloveEl.innerHTML = GLOVE_CLOSED;
+  packRenderer.domElement.style.cursor = 'none';
+});
+
+packRenderer.domElement.addEventListener('mouseup', () => {
+  if (!heldPackEgg) return;
+  heldPackEgg.held = false;
+  heldPackEgg.mesh.position.y = 0.1; // back to table height
+
+  // Snap into nearest open slot if close enough.
+  let nearest = null, nearestDist = Infinity;
+  for (const slot of packSlots) {
+    if (slot.filled) continue;
+    const dx = slot.x - heldPackEgg.mesh.position.x;
+    const dz = slot.z - heldPackEgg.mesh.position.z;
+    const d  = Math.sqrt(dx * dx + dz * dz);
+    if (d < nearestDist) { nearestDist = d; nearest = slot; }
+  }
+  if (nearest && nearestDist < 0.22) {
+    heldPackEgg.mesh.position.set(nearest.x, 0.14, nearest.z);
+    heldPackEgg.mesh.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    heldPackEgg.vx = 0; heldPackEgg.vz = 0;
+    nearest.filled = true;
+    nearest.mesh.material = slotFilledMat;
+    heldPackEgg.settled = true;
+    heldPackEgg.slot = nearest;
+  } else {
+    heldPackEgg.vx = 0;
+    heldPackEgg.vz = 0;
+  }
+
+  const released = heldPackEgg;
+  heldPackEgg = null;
+
+  // Re-check hover so the glove immediately becomes open if still over an egg.
+  const meshes = packEggs.filter(e => e !== released).map(e => e.mesh);
+  const hits = meshes.length ? packRaycaster.intersectObjects(meshes) : [];
+  if (hits.length > 0) {
+    hoveredPackEgg = packEggs.find(e => e.mesh === hits[0].object) || null;
+    gloveEl.innerHTML = GLOVE_OPEN;
+    gloveEl.style.display = 'block';
+  } else {
+    hoveredPackEgg = null;
+    gloveEl.style.display = 'none';
+    packRenderer.domElement.style.cursor = '';
+  }
+});
 
 // ---------- Spawn chickens ----------
 
@@ -860,7 +1294,9 @@ function animate() {
   updateBlood(dt);
   updateEggs(dt);
   if (raking) applyRakeCollision();
+  updatePackEggs(dt);
   renderer.render(scene, camera);
+  packRenderer.render(packScene, packCamera);
   requestAnimationFrame(animate);
 }
 
