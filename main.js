@@ -14,10 +14,6 @@ const skyColor = 0xbfe8ff;
 scene.background = new THREE.Color(skyColor);
 scene.fog = new THREE.Fog(skyColor, 26, 50);
 
-// The game keeps a fixed 3:4 portrait aspect ratio and is letterboxed to fit
-// inside the window rather than stretching to match whatever shape the
-// window happens to be. Since the aspect ratio never changes, the camera's
-// frustum and angle are fixed too -- no more adapting per resize.
 const GAME_ASPECT = 3 / 4;
 const ORTHO_HALF_WIDTH = 4.5;
 const ORTHO_HALF_HEIGHT = ORTHO_HALF_WIDTH / GAME_ASPECT;
@@ -26,7 +22,7 @@ const camera = new THREE.OrthographicCamera(
   ORTHO_HALF_HEIGHT, -ORTHO_HALF_HEIGHT,
   0.1, 100
 );
-const CAMERA_DISTANCE = Math.hypot(15, 17); // keep the original distance/zoom
+const CAMERA_DISTANCE = Math.hypot(15, 17);
 const CAMERA_ELEVATION_DEG = 35;
 const elevationRad = THREE.MathUtils.degToRad(CAMERA_ELEVATION_DEG);
 camera.position.set(0, CAMERA_DISTANCE * Math.sin(elevationRad), CAMERA_DISTANCE * Math.cos(elevationRad));
@@ -38,7 +34,6 @@ function resize() {
   const windowHeight = window.innerHeight;
   if (windowWidth === 0 || windowHeight === 0) return;
 
-  // Fit the fixed-aspect frame inside the window (contain, not cover).
   let width = windowWidth;
   let height = width / GAME_ASPECT;
   if (height > windowHeight) {
@@ -51,10 +46,6 @@ function resize() {
   renderer.setSize(width, height);
 }
 
-// The viewport isn't always settled the instant this script runs, so a
-// single synchronous read of window.innerWidth/innerHeight can lock the
-// canvas at 0x0 with nothing left to correct it. Re-checking on the next
-// animation frame (after layout has definitely happened) fixes that.
 resize();
 requestAnimationFrame(resize);
 window.addEventListener('resize', resize);
@@ -73,7 +64,7 @@ sun.shadow.camera.top = 16;
 sun.shadow.camera.bottom = -16;
 scene.add(sun);
 
-// ---------- Ground (low-poly faceted terrain) ----------
+// ---------- Ground ----------
 
 const GROUND_SIZE = 34;
 const groundGeo = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE, 18, 18);
@@ -98,7 +89,6 @@ const ground = new THREE.Mesh(groundGeo, groundMat);
 ground.receiveShadow = true;
 scene.add(ground);
 
-// A few simple low-poly trees for atmosphere
 function makeTree(x, z) {
   const tree = new THREE.Group();
   const trunk = new THREE.Mesh(
@@ -143,38 +133,32 @@ class Chicken {
     const combMat = new THREE.MeshStandardMaterial({ color: 0xd6392b, flatShading: true });
     const legMat = new THREE.MeshStandardMaterial({ color: 0xf2a53c, flatShading: true });
 
-    // Body
     const body = new THREE.Mesh(new THREE.IcosahedronGeometry(0.42, 0), bodyMat);
     body.scale.set(1, 0.9, 1.3);
     body.position.y = 0.55;
     body.castShadow = true;
     this.group.add(body);
 
-    // Head
     const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.24, 0), bodyMat);
     head.position.set(0, 0.98, 0.42);
     head.castShadow = true;
     this.group.add(head);
 
-    // Comb
     const comb = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.16, 4), combMat);
     comb.position.set(0, 1.2, 0.42);
     this.group.add(comb);
 
-    // Beak
     const beak = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 4), beakMat);
     beak.rotation.x = Math.PI / 2;
     beak.position.set(0, 0.96, 0.68);
     this.group.add(beak);
 
-    // Tail
     const tail = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.5, 4), bodyMat);
     tail.rotation.x = Math.PI / 2.6;
     tail.position.set(0, 0.75, -0.58);
     tail.castShadow = true;
     this.group.add(tail);
 
-    // Wings (pivoted so they can flap)
     this.wings = [];
     [-1, 1].forEach((side) => {
       const pivot = new THREE.Group();
@@ -191,7 +175,6 @@ class Chicken {
       this.wings.push({ pivot, side });
     });
 
-    // Legs
     this.legs = [];
     [-1, 1].forEach((side) => {
       const leg = new THREE.Mesh(
@@ -204,7 +187,6 @@ class Chicken {
       this.legs.push(leg);
     });
 
-    // Alert mark, grows as clicks agitate the chicken, hidden otherwise
     this.alert = new THREE.Mesh(
       new THREE.ConeGeometry(0.09, 0.26, 4),
       new THREE.MeshStandardMaterial({ color: 0xff3b30, flatShading: true })
@@ -213,7 +195,7 @@ class Chicken {
     this.alert.scale.setScalar(0.0001);
     this.group.add(this.alert);
 
-    // State
+    // Walk state
     this.state = 'walk';
     this.speed = 1.0 + Math.random() * 0.6;
     this.walkSpeed = 0.35 + Math.random() * 0.25;
@@ -222,27 +204,25 @@ class Chicken {
     this.walkClock = Math.random() * 10;
     this.flightHeight = 3.5 + Math.random() * 1.5;
     this.flapSpeed = 10 + Math.random() * 4;
-
-    // Occasional resting: set once it arrives at a target, counts down with
-    // no movement, then it picks a new target and wanders off again.
     this.restTimer = 0.5 + Math.random() * 2;
 
-    // Click-agitation: each click adds a jolt that decays over time, so only
-    // a burst of clicks arriving faster than the decay pushes it past the
-    // threshold and into flight — a single stray click just fades away.
-    // Below liftStartAgitation it just bolts along the ground; from there up
-    // to the threshold it starts visibly lifting off before committing to
-    // real flight.
     this.agitation = 0;
     this.agitationThreshold = 8;
     this.liftStartAgitation = 5;
     this.agitationPerClick = 1;
     this.agitationDecayPerSecond = 0.6;
     this.flinchTimer = 0;
-    this.preFlightLift = 1.7; // how high the agitation alone can hoist it before real flight kicks in
-
-    // A click briefly boosts ground speed so fleeing reads as a panicked dash
+    this.preFlightLift = 1.7;
     this.fleeBoostTimer = 0;
+
+    // Orbit state (active while flying)
+    this.orbitAngle = Math.random() * Math.PI * 2;
+    this.orbitRadius = 2.8 + Math.random() * 1.2;
+    this.orbitSpeed = (0.45 + Math.random() * 0.25) * (Math.random() < 0.5 ? 1 : -1);
+
+    // Fall / stun state
+    this.fallSpeed = 0;
+    this.stunTimer = 0;
   }
 
   pickTarget() {
@@ -263,12 +243,6 @@ class Chicken {
     }
   }
 
-  // Darts directly away from wherever the mouse actually hit the chicken's
-  // mesh, using the raw 3D hit point rather than projecting it onto the
-  // ground first -- that projection continues the click ray down to y=0,
-  // which shifts the point further along the camera's viewing direction the
-  // higher up the mesh was clicked, creating a bias toward always fleeing
-  // away from the camera regardless of the click's actual screen position.
   flee(hitPoint) {
     const away = new THREE.Vector2(
       this.group.position.x - hitPoint.x,
@@ -296,7 +270,20 @@ class Chicken {
     this.state = 'fly';
     this.agitation = 0;
     this.alert.scale.setScalar(0.0001);
-    this.target = this.pickTarget();
+    this.flyStartTimer = 0;
+    // Begin orbit from wherever the chicken currently stands
+    this.orbitAngle = Math.atan2(this.group.position.x, this.group.position.z);
+    this.orbitRadius = THREE.MathUtils.clamp(
+      Math.hypot(this.group.position.x, this.group.position.z),
+      2.5, 4.0
+    );
+  }
+
+  shootDown() {
+    if (this.state !== 'fly' || this.flyStartTimer < 1) return;
+    this.state = 'falling';
+    this.fallSpeed = 0;
+    this.group.rotation.x = 0;
   }
 
   update(dt) {
@@ -313,7 +300,6 @@ class Chicken {
         isWalking = this.updateGroundMovement(dt, speedMultiplier);
       }
 
-      // agitation fades unless clicks keep landing faster than it decays
       this.agitation = Math.max(0, this.agitation - this.agitationDecayPerSecond * dt);
       const alertRatio = this.agitation / this.agitationThreshold;
       this.alert.scale.setScalar(Math.max(0.0001, alertRatio));
@@ -322,33 +308,38 @@ class Chicken {
       if (this.flinchTimer > 0) this.flinchTimer -= dt;
       const flinch = this.flinchTimer > 0 ? Math.sin((this.flinchTimer / 0.25) * Math.PI) : 0;
 
-      // below liftStartAgitation it's purely a ground dash; only past that
-      // point does it start visibly lifting off ahead of committing to flight
       const liftRatio = THREE.MathUtils.clamp(
         (this.agitation - this.liftStartAgitation) / (this.agitationThreshold - this.liftStartAgitation),
         0, 1
       );
       const lift = liftRatio * this.preFlightLift;
 
-      // leg waddle speeds up while fleeing, legs stay put while resting,
-      // wings mostly folded, flared briefly on a flinch or the higher it's
-      // being held up
       const swing = isWalking ? Math.sin(this.walkClock * this.walkSpeed * speedMultiplier * 8) * 0.35 : 0;
       this.legs[0].rotation.x = swing - liftRatio * 0.9;
       this.legs[1].rotation.x = -swing - liftRatio * 0.9;
       this.wings.forEach(({ pivot, side }) => {
         pivot.rotation.z = side * (0.2 + Math.sin(this.walkClock * 4) * 0.05 + flinch * 0.6 + liftRatio * 0.5);
       });
-      // small body bob while walking, a startled hop while flinching, plus the sustained lift
       const bob = isWalking ? Math.abs(Math.sin(this.walkClock * this.walkSpeed * speedMultiplier * 8)) * 0.05 : 0;
       this.group.position.y = bob + flinch * 0.2 + lift;
-    } else {
+
+    } else if (this.state === 'fly') {
+      this.flyStartTimer += dt;
       this.updateFlying(dt);
-      // fast wing flap
       this.wings.forEach(({ pivot, side }) => {
         pivot.rotation.z = side * (0.3 + Math.sin(this.walkClock * this.flapSpeed) * 0.9);
       });
       this.legs.forEach((leg) => (leg.rotation.x = -0.6));
+
+    } else if (this.state === 'falling') {
+      this.updateFalling(dt);
+      // Flail wings during tumble
+      this.wings.forEach(({ pivot, side }) => {
+        pivot.rotation.z = side * (0.3 + Math.sin(this.walkClock * this.flapSpeed * 2.5) * 1.4);
+      });
+
+    } else if (this.state === 'stunned') {
+      this.updateStunned(dt);
     }
   }
 
@@ -375,26 +366,54 @@ class Chicken {
   }
 
   updateFlying(dt) {
-    const pos2 = new THREE.Vector2(this.group.position.x, this.group.position.z);
-    const toTarget = this.target.clone().sub(pos2);
-    const dist = toTarget.length();
+    this.orbitAngle += this.orbitSpeed * dt;
 
-    if (dist < 0.5) {
-      this.target = this.pickTarget();
-    } else {
-      toTarget.normalize();
-      const desiredHeading = Math.atan2(toTarget.x, toTarget.y);
-      this.heading = lerpAngle(this.heading, desiredHeading, 1 - Math.pow(0.0005, dt));
-      this.group.rotation.y = this.heading;
-      const moveDist = this.speed * 1.6 * dt;
-      this.group.position.x += Math.sin(this.heading) * moveDist;
-      this.group.position.z += Math.cos(this.heading) * moveDist;
-    }
+    // Target position on the orbit circle
+    const orbitX = Math.sin(this.orbitAngle) * this.orbitRadius;
+    const orbitZ = Math.cos(this.orbitAngle) * this.orbitRadius;
 
-    // rise toward flight height with a gentle bob
+    // Ease toward orbit position so the entry looks smooth
+    this.group.position.x += (orbitX - this.group.position.x) * Math.min(1, dt * 1.5);
+    this.group.position.z += (orbitZ - this.group.position.z) * Math.min(1, dt * 1.5);
+
+    // Face the tangent direction of the orbit
+    const tangentX = Math.cos(this.orbitAngle) * Math.sign(this.orbitSpeed);
+    const tangentZ = -Math.sin(this.orbitAngle) * Math.sign(this.orbitSpeed);
+    const desiredHeading = Math.atan2(tangentX, tangentZ);
+    this.heading = lerpAngle(this.heading, desiredHeading, Math.min(1, dt * 3));
+    this.group.rotation.y = this.heading;
+
     const targetY = this.flightHeight + Math.sin(this.walkClock * 2) * 0.25;
     this.group.position.y += (targetY - this.group.position.y) * Math.min(1, dt * 2);
     this.group.rotation.x = -0.15;
+  }
+
+  updateFalling(dt) {
+    this.fallSpeed += 14 * dt;
+    this.group.position.y -= this.fallSpeed * dt;
+    this.group.rotation.z += dt * 6;
+    this.group.rotation.x += dt * 4;
+
+    if (this.group.position.y <= 0.05) {
+      this.group.position.y = 0;
+      this.state = 'stunned';
+      this.stunTimer = 2.5;
+      this.group.rotation.x = Math.PI / 2;
+      this.group.rotation.z = 0;
+      spawnEgg(this.group.position.x, this.group.position.z, this.heading);
+    }
+  }
+
+  updateStunned(dt) {
+    this.stunTimer -= dt;
+    if (this.stunTimer <= 0) {
+      this.state = 'walk';
+      this.group.rotation.x = 0;
+      this.group.rotation.z = 0;
+      this.agitation = 0;
+      this.restTimer = 1;
+      this.target = this.pickTarget();
+    }
   }
 }
 
@@ -451,28 +470,94 @@ for (let i = 0; i < CHICKEN_COUNT; i++) {
   chickens.push(chicken);
 }
 
-// ---------- Click to fly ----------
+// ---------- Raycaster ----------
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
-renderer.domElement.addEventListener('click', (event) => {
-  // Use the canvas's own bounding rect, not the window -- the game is
-  // letterboxed inside a fixed-aspect frame, so it rarely fills the window.
+// ---------- Bullseye cursor ----------
+
+const bullseye = document.createElement('div');
+bullseye.innerHTML = `<svg viewBox="0 0 48 48" width="48" height="48">
+  <circle cx="24" cy="24" r="20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="24" cy="24" r="10" fill="none" stroke="currentColor" stroke-width="3"/>
+  <circle cx="24" cy="24" r="3"  fill="currentColor"/>
+  <line x1="24" y1="1"  x2="24" y2="13" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="24" y1="35" x2="24" y2="47" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="1"  y1="24" x2="13" y2="24" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="35" y1="24" x2="47" y2="24" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+</svg>`;
+Object.assign(bullseye.style, {
+  display: 'none',
+  position: 'absolute',
+  transform: 'translate(-50%, -50%)',
+  pointerEvents: 'none',
+  zIndex: '10',
+});
+gameFrame.appendChild(bullseye);
+
+renderer.domElement.addEventListener('mousemove', (event) => {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
   raycaster.setFromCamera(pointer, camera);
-  const intersects = raycaster.intersectObjects(
-    chickens.map((c) => c.group),
-    true
-  );
+  const flying = chickens.filter((c) => c.state === 'fly');
+  const hits = flying.length
+    ? raycaster.intersectObjects(flying.map((c) => c.group), true)
+    : [];
 
-  if (intersects.length > 0) {
-    let obj = intersects[0].object;
+  if (hits.length > 0) {
+    let obj = hits[0].object;
     while (obj && !obj.userData.chicken) obj = obj.parent;
-    if (obj) obj.userData.chicken.registerClick(intersects[0].point);
+    const canShoot = obj && obj.userData.chicken.flyStartTimer >= 1;
+
+    const frameRect = gameFrame.getBoundingClientRect();
+    bullseye.style.left = `${event.clientX - frameRect.left}px`;
+    bullseye.style.top = `${event.clientY - frameRect.top}px`;
+    bullseye.style.color = canShoot ? '#ff8000' : '#888888';
+    bullseye.style.display = 'block';
+    renderer.domElement.style.cursor = 'none';
+  } else {
+    bullseye.style.display = 'none';
+    renderer.domElement.style.cursor = '';
+  }
+});
+
+renderer.domElement.addEventListener('mouseleave', () => {
+  bullseye.style.display = 'none';
+  renderer.domElement.style.cursor = '';
+});
+
+// ---------- Click handler ----------
+
+renderer.domElement.addEventListener('click', (event) => {
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+
+  raycaster.setFromCamera(pointer, camera);
+
+  // Flying chickens take priority — click shoots them down
+  const flying = chickens.filter((c) => c.state === 'fly');
+  if (flying.length) {
+    const hits = raycaster.intersectObjects(flying.map((c) => c.group), true);
+    if (hits.length > 0) {
+      let obj = hits[0].object;
+      while (obj && !obj.userData.chicken) obj = obj.parent;
+      if (obj) { obj.userData.chicken.shootDown(); return; }
+    }
+  }
+
+  // Walking chickens — click agitates / lays egg
+  const walking = chickens.filter((c) => c.state === 'walk');
+  if (walking.length) {
+    const hits = raycaster.intersectObjects(walking.map((c) => c.group), true);
+    if (hits.length > 0) {
+      let obj = hits[0].object;
+      while (obj && !obj.userData.chicken) obj = obj.parent;
+      if (obj) obj.userData.chicken.registerClick(hits[0].point);
+    }
   }
 });
 
