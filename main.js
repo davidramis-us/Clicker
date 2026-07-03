@@ -1017,33 +1017,98 @@ Object.assign(gloveEl.style, {
 });
 packFrame.appendChild(gloveEl);
 
-// Open hand (hovering) — fingers spread, ready to grab.
-const GLOVE_OPEN = `<svg viewBox="0 0 38 50" width="34" height="46">
-  <rect x="1"  y="4"  width="8" height="22" rx="4" fill="currentColor"/>
-  <rect x="11" y="2"  width="8" height="24" rx="4" fill="currentColor"/>
-  <rect x="21" y="2"  width="8" height="24" rx="4" fill="currentColor"/>
-  <rect x="30" y="6"  width="7" height="20" rx="3.5" fill="currentColor"/>
-  <rect x="1"  y="20" width="36" height="18" rx="7" fill="currentColor"/>
-  <rect x="5"  y="33" width="28" height="17" rx="5" fill="currentColor"/>
-  <rect x="7"  y="35" width="24" height="3"  rx="1.5" fill="white" opacity="0.22"/>
-</svg>`;
+// Animated glove — one persistent SVG; finger/palm rects updated per frame.
+const SVGNS = 'http://www.w3.org/2000/svg';
+function mkSvgRect(x, y, w, h, rx, fill) {
+  const r = document.createElementNS(SVGNS, 'rect');
+  r.setAttribute('x', x);     r.setAttribute('y', y);
+  r.setAttribute('width', w); r.setAttribute('height', h);
+  r.setAttribute('rx', rx);   r.setAttribute('fill', fill ?? 'currentColor');
+  return r;
+}
+const gloveSvg = document.createElementNS(SVGNS, 'svg');
+gloveSvg.setAttribute('viewBox', '0 0 38 52');
+gloveSvg.setAttribute('width', '34');
+gloveSvg.setAttribute('height', '46');
+gloveEl.appendChild(gloveSvg);
 
-// Closed fist (holding) — knuckles up, thumb wrapped around.
-const GLOVE_CLOSED = `<svg viewBox="0 0 38 46" width="34" height="42">
-  <rect x="1"  y="2"  width="8" height="13" rx="4" fill="currentColor"/>
-  <rect x="11" y="0"  width="8" height="15" rx="4" fill="currentColor"/>
-  <rect x="21" y="2"  width="8" height="13" rx="4" fill="currentColor"/>
-  <rect x="30" y="5"  width="7" height="10" rx="3.5" fill="currentColor"/>
-  <rect x="1"  y="11" width="36" height="15" rx="7" fill="currentColor"/>
-  <rect x="1"  y="19" width="12" height="8"  rx="4" fill="currentColor"/>
-  <rect x="5"  y="22" width="28" height="17" rx="5" fill="currentColor"/>
-  <rect x="7"  y="24" width="24" height="3"  rx="1.5" fill="white" opacity="0.22"/>
-</svg>`;
+// [x, w, rx, yOpen, hOpen, yClose, hClose] — finger bottoms anchor at y=26 when open.
+const FDEFS = [
+  [ 1, 8, 4.0,  4, 22,  2, 13],
+  [11, 8, 4.0,  2, 24,  0, 15],
+  [21, 8, 4.0,  2, 24,  2, 13],
+  [30, 7, 3.5,  6, 20,  5, 10],
+];
+const fingerRects = FDEFS.map(([x, w, rx, yO, hO]) => {
+  const r = mkSvgRect(x, yO, w, hO, rx);
+  gloveSvg.appendChild(r);
+  return r;
+});
+const glovePalm      = mkSvgRect(1, 20, 36, 18, 7);
+gloveSvg.appendChild(glovePalm);
+const gloveThumb     = mkSvgRect(1, 28, 12,  8, 4);
+gloveThumb.setAttribute('opacity', '0');
+gloveSvg.appendChild(gloveThumb);
+const gloveCuff      = mkSvgRect(5, 33, 28, 17, 5);
+gloveSvg.appendChild(gloveCuff);
+const gloveCuffShine = mkSvgRect(7, 35, 24,  3, 1.5, 'white');
+gloveCuffShine.setAttribute('opacity', '0.22');
+gloveSvg.appendChild(gloveCuffShine);
+
+let gloveState = 'idle'; // 'idle' | 'hover' | 'hold'
+let gloveAnimT = 0;
 
 function updateGlovePos(event) {
   const fr = packFrame.getBoundingClientRect();
   gloveEl.style.left = `${event.clientX - fr.left}px`;
   gloveEl.style.top  = `${event.clientY - fr.top}px`;
+}
+
+function updateGloveAnimation(dt) {
+  if (gloveState === 'idle') return;
+  gloveAnimT += dt;
+
+  // Overall grab factor: 0 = fully open, 1 = fully closed.
+  let grabFactor;
+  if (gloveState === 'hold') {
+    // Tight fist with a subtle squeeze pulse.
+    grabFactor = 1.0 - Math.abs(Math.sin(gloveAnimT * 7)) * 0.07;
+  } else {
+    // Eager reach: rhythmic close-and-open at ~1.4 Hz, never quite closing all the way.
+    const raw = (Math.sin(gloveAnimT * Math.PI * 2.8) + 1) / 2;
+    grabFactor = Math.pow(raw, 0.45) * 0.82;
+  }
+
+  // Vertical bounce while hovering — hand "reaching" up and down.
+  const bounce = gloveState === 'hold' ? 0 : Math.sin(gloveAnimT * 10.5) * 2.8;
+  gloveEl.style.transform = `translate(-50%, calc(-48% + ${bounce.toFixed(1)}px))`;
+
+  // Each finger closes with a slight rolling delay (70 ms stagger).
+  FDEFS.forEach(([,, , yO, hO, yC, hC], i) => {
+    let tf;
+    if (gloveState === 'hold') {
+      tf = grabFactor;
+    } else {
+      const phase = i * 0.07;
+      const raw = (Math.sin((gloveAnimT - phase) * Math.PI * 2.8) + 1) / 2;
+      tf = Math.pow(raw, 0.45) * 0.82;
+    }
+    fingerRects[i].setAttribute('y', (yO + (yC - yO) * tf).toFixed(1));
+    fingerRects[i].setAttribute('height', (hO + (hC - hO) * tf).toFixed(1));
+  });
+
+  // Palm shifts up and shortens as hand closes.
+  const palmY = 20 + (11 - 20) * grabFactor;
+  const palmH = 18 + (15 - 18) * grabFactor;
+  glovePalm.setAttribute('y', palmY.toFixed(1));
+  glovePalm.setAttribute('height', palmH.toFixed(1));
+  const cuffY = palmY + palmH;
+  gloveCuff.setAttribute('y', cuffY.toFixed(1));
+  gloveCuffShine.setAttribute('y', (cuffY + 2).toFixed(1));
+
+  // Thumb fades in and tracks the palm as the grip tightens.
+  gloveThumb.setAttribute('y', (palmY + 8).toFixed(1));
+  gloveThumb.setAttribute('opacity', THREE.MathUtils.clamp(grabFactor * 1.3 - 0.1, 0, 1).toFixed(2));
 }
 
 packRenderer.domElement.addEventListener('mousemove', (event) => {
@@ -1069,12 +1134,13 @@ packRenderer.domElement.addEventListener('mousemove', (event) => {
   const hits = meshes.length ? packRaycaster.intersectObjects(meshes) : [];
   if (hits.length > 0) {
     hoveredPackEgg = packEggs.find(e => e.mesh === hits[0].object) || null;
-    gloveEl.innerHTML = GLOVE_OPEN;
+    gloveState = 'hover';
     gloveEl.style.display = 'block';
     packRenderer.domElement.style.cursor = 'none';
     updateGlovePos(event);
   } else {
     hoveredPackEgg = null;
+    gloveState = 'idle';
     gloveEl.style.display = 'none';
     packRenderer.domElement.style.cursor = '';
   }
@@ -1083,6 +1149,7 @@ packRenderer.domElement.addEventListener('mousemove', (event) => {
 packRenderer.domElement.addEventListener('mouseleave', () => {
   if (!heldPackEgg) {
     hoveredPackEgg = null;
+    gloveState = 'idle';
     gloveEl.style.display = 'none';
     packRenderer.domElement.style.cursor = '';
   }
@@ -1102,7 +1169,7 @@ packRenderer.domElement.addEventListener('mousedown', () => {
   heldPackEgg.held = true;
   heldPackEgg.vx = 0;
   heldPackEgg.vz = 0;
-  gloveEl.innerHTML = GLOVE_CLOSED;
+  gloveState = 'hold';
   packRenderer.domElement.style.cursor = 'none';
 });
 
@@ -1141,10 +1208,11 @@ packRenderer.domElement.addEventListener('mouseup', () => {
   const hits = meshes.length ? packRaycaster.intersectObjects(meshes) : [];
   if (hits.length > 0) {
     hoveredPackEgg = packEggs.find(e => e.mesh === hits[0].object) || null;
-    gloveEl.innerHTML = GLOVE_OPEN;
+    gloveState = 'hover';
     gloveEl.style.display = 'block';
   } else {
     hoveredPackEgg = null;
+    gloveState = 'idle';
     gloveEl.style.display = 'none';
     packRenderer.domElement.style.cursor = '';
   }
@@ -1295,6 +1363,7 @@ function animate() {
   updateEggs(dt);
   if (raking) applyRakeCollision();
   updatePackEggs(dt);
+  updateGloveAnimation(dt);
   renderer.render(scene, camera);
   packRenderer.render(packScene, packCamera);
   requestAnimationFrame(animate);
