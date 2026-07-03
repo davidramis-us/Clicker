@@ -1415,13 +1415,15 @@ function updateStatsPanel(dt) {
   statsTick = 0;
 
   const hens     = chickens.filter(c => c.canLayEggs).length;
-  const flying   = chickens.filter(c => c.state === 'fly').length;
-  const roosters = chickens.filter(c => !c.canLayEggs).length;
-  const pct      = eggsLaid > 0 ? ((eggsSwept / eggsLaid) * 100).toFixed(1) + '%' : '—';
+  const hensFlying     = chickens.filter(c =>  c.canLayEggs && c.state === 'fly').length;
+  const roosters       = chickens.filter(c => !c.canLayEggs).length;
+  const roostersFlying = chickens.filter(c => !c.canLayEggs && c.state === 'fly').length;
+  const pct            = eggsLaid > 0 ? ((eggsSwept / eggsLaid) * 100).toFixed(1) + '%' : '—';
 
-  setStat('stat-hens',       hens);
-  setStat('stat-flying',     flying);
-  setStat('stat-roosters',   roosters);
+  setStat('stat-hens',          hens);
+  setStat('stat-hens-air',      hensFlying);
+  setStat('stat-roosters',      roosters);
+  setStat('stat-roosters-air',  roostersFlying);
   setStat('stat-eggs-laid',  eggsLaid);
   setStat('stat-eggs-swept', eggsSwept);
   setStat('stat-eggs-pct',   pct);

@@ -113,6 +113,26 @@ html, body {
   color: #ce9178;
 }
 
+.stats-sub {
+  padding-left: 10px;
+  margin-top: -1px;
+}
+
+.stats-sub .stats-label {
+  color: #4a6e4a;
+  font-size: clamp(7px, 0.56vw, 10px);
+}
+
+.stats-sub .stats-value {
+  color: #5a8a5a;
+  font-size: clamp(7px, 0.56vw, 10px);
+}
+
+.stats-tree {
+  color: #3a3a3a;
+  margin-right: 2px;
+}
+
 canvas {
   display: block;
   image-rendering: pixelated;
