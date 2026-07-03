@@ -4,8 +4,8 @@ import * as THREE from 'three';
 
 const gameFrame = document.getElementById('game-frame');
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: false });
+renderer.setPixelRatio(0.275 * window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 gameFrame.appendChild(renderer.domElement);
 
