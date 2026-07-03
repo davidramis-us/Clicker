@@ -221,8 +221,9 @@ class Chicken {
     this.orbitSpeed = (0.45 + Math.random() * 0.25) * (Math.random() < 0.5 ? 1 : -1);
 
     // Fall / stun state
-    this.fallSpeed = 0;
+    this.velocity = new THREE.Vector3();
     this.stunTimer = 0;
+    this.bloodDripTimer = 0;
   }
 
   pickTarget() {
@@ -234,7 +235,9 @@ class Chicken {
 
   registerClick(hitPoint) {
     if (this.state !== 'walk') return;
-    spawnEgg(this.group.position.x, this.group.position.z, this.heading);
+    if (this.agitation < this.liftStartAgitation) {
+      spawnEgg(this.group.position.x, this.group.position.z, this.heading);
+    }
     this.flee(hitPoint);
     this.agitation = Math.min(this.agitationThreshold, this.agitation + this.agitationPerClick);
     this.flinchTimer = 0.25;
@@ -282,8 +285,12 @@ class Chicken {
   shootDown() {
     if (this.state !== 'fly' || this.flyStartTimer < 1) return;
     this.state = 'falling';
-    this.fallSpeed = 0;
+    // Knock back: upward arc + pushed away from camera (world +Z = "up the screen")
+    const spread = (Math.random() - 0.5) * 2.5;
+    this.velocity.set(spread, 4.5, -5).normalize().multiplyScalar(7 + Math.random() * 2);
     this.group.rotation.x = 0;
+    this.bloodDripTimer = 0;
+    spawnBlood(this.group.position.x, this.group.position.y + 0.6, this.group.position.z, 24);
   }
 
   update(dt) {
@@ -389,10 +396,17 @@ class Chicken {
   }
 
   updateFalling(dt) {
-    this.fallSpeed += 14 * dt;
-    this.group.position.y -= this.fallSpeed * dt;
-    this.group.rotation.z += dt * 6;
-    this.group.rotation.x += dt * 4;
+    this.velocity.y -= 22 * dt;
+    this.group.position.addScaledVector(this.velocity, dt);
+    this.group.rotation.z += dt * 18;
+    this.group.rotation.x += dt * 14;
+
+    // Continuous blood drip while tumbling
+    this.bloodDripTimer -= dt;
+    if (this.bloodDripTimer <= 0) {
+      this.bloodDripTimer = 0.06 + Math.random() * 0.05;
+      spawnBlood(this.group.position.x, this.group.position.y + 0.4, this.group.position.z, 3);
+    }
 
     if (this.group.position.y <= 0.05) {
       this.group.position.y = 0;
@@ -422,6 +436,71 @@ function lerpAngle(a, b, t) {
   while (diff > Math.PI) diff -= Math.PI * 2;
   while (diff < -Math.PI) diff += Math.PI * 2;
   return a + diff * t;
+}
+
+// ---------- Blood particles ----------
+
+const BLOOD_GEO = new THREE.BoxGeometry(0.07, 0.07, 0.07);
+const BLOOD_MATS = [
+  new THREE.MeshStandardMaterial({ color: 0xcc0000, flatShading: true }),
+  new THREE.MeshStandardMaterial({ color: 0x8b0000, flatShading: true }),
+  new THREE.MeshStandardMaterial({ color: 0xff2200, flatShading: true }),
+];
+const bloodParticles = [];
+
+function spawnBlood(x, y, z, count) {
+  for (let i = 0; i < count; i++) {
+    const mesh = new THREE.Mesh(BLOOD_GEO, BLOOD_MATS[Math.floor(Math.random() * 3)]);
+    mesh.scale.setScalar(0.5 + Math.random() * 1.0);
+    mesh.position.set(
+      x + (Math.random() - 0.5) * 0.25,
+      y + (Math.random() - 0.5) * 0.25,
+      z + (Math.random() - 0.5) * 0.25
+    );
+    const speed = 1.5 + Math.random() * 4.5;
+    const angle = Math.random() * Math.PI * 2;
+    const upBias = 0.3 + Math.random() * 0.65;
+    const lateral = Math.sqrt(1 - upBias * upBias);
+    scene.add(mesh);
+    bloodParticles.push({
+      mesh,
+      velocity: new THREE.Vector3(
+        Math.sin(angle) * lateral * speed,
+        upBias * speed,
+        Math.cos(angle) * lateral * speed
+      ),
+      life: 0,
+      maxLife: 0.6 + Math.random() * 0.7,
+    });
+  }
+}
+
+function updateBlood(dt) {
+  for (let i = bloodParticles.length - 1; i >= 0; i--) {
+    const p = bloodParticles[i];
+    p.life += dt;
+    p.velocity.y -= 16 * dt;
+    p.mesh.position.addScaledVector(p.velocity, dt);
+
+    // Splat on ground — tiny bounce then settle
+    if (p.mesh.position.y < 0.035) {
+      p.mesh.position.y = 0.035;
+      p.velocity.y = Math.abs(p.velocity.y) * 0.2;
+      p.velocity.x *= 0.5;
+      p.velocity.z *= 0.5;
+    }
+
+    // Shrink out near end of life
+    const t = p.life / p.maxLife;
+    if (t > 0.6) {
+      p.mesh.scale.setScalar(Math.max(0.001, ((1 - t) / 0.4) * (0.5 + Math.random() * 1.0)));
+    }
+
+    if (p.life >= p.maxLife) {
+      scene.remove(p.mesh);
+      bloodParticles.splice(i, 1);
+    }
+  }
 }
 
 // ---------- Eggs ----------
@@ -568,6 +647,7 @@ const clock = new THREE.Clock();
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
   chickens.forEach((c) => c.update(dt));
+  updateBlood(dt);
   updateEggs(dt);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
