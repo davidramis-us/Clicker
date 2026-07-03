@@ -3,9 +3,9 @@
   "configurations": [
     {
       "name": "chicken-yard",
-      "runtimeExecutable": "py",
-      "runtimeArgs": ["-m", "http.server", "8080"],
-      "port": 8080
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
     }
   ]
 }
