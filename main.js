@@ -38,6 +38,7 @@ camera.updateProjectionMatrix();
 // ---------- Stats counters ----------
 
 let totalShots = 0;
+let headshots  = 0;
 let eggsLaid   = 0;
 let eggsSwept  = 0;
 
@@ -161,6 +162,7 @@ class Chicken {
     const head = new THREE.Mesh(new THREE.IcosahedronGeometry(0.24, 0), bodyMat);
     head.position.set(0, 0.98, 0.42);
     head.castShadow = true;
+    head.userData.isHead = true;
     this.group.add(head);
 
     const comb = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.16, 4), combMat);
@@ -305,9 +307,10 @@ class Chicken {
     );
   }
 
-  shootDown(hitPoint) {
+  shootDown(hitPoint, isHeadshot = false) {
     if (this.state !== 'fly' || this.flyStartTimer < 1) return;
     totalShots++;
+    if (isHeadshot) headshots++;
     this.state = 'falling';
 
     const cx = this.group.position.x;
@@ -1356,9 +1359,11 @@ renderer.domElement.addEventListener('mousedown', (event) => {
   if (flying.length) {
     const hits = raycaster.intersectObjects(flying.map((c) => c.group), true);
     if (hits.length > 0) {
-      let obj = hits[0].object;
+      const hitMesh = hits[0].object;
+      const isHeadshot = hitMesh.userData.isHead === true;
+      let obj = hitMesh;
       while (obj && !obj.userData.chicken) obj = obj.parent;
-      if (obj) { obj.userData.chicken.shootDown(hits[0].point); return; }
+      if (obj) { obj.userData.chicken.shootDown(hits[0].point, isHeadshot); return; }
     }
   }
 
@@ -1428,6 +1433,9 @@ function updateStatsPanel(dt) {
   setStat('stat-eggs-swept', eggsSwept);
   setStat('stat-eggs-pct',   pct);
   setStat('stat-shots',      totalShots);
+  setStat('stat-headshots',  headshots);
+  const hsPct = totalShots > 0 ? ((headshots / totalShots) * 100).toFixed(1) + '%' : '—';
+  setStat('stat-hs-pct',    hsPct);
 }
 
 // ---------- Animation loop ----------
