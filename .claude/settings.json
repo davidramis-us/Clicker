@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" remote get-url origin)"
+      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" remote get-url origin)",
+      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" status)",
+      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" log --oneline -5)",
+      "Bash(git -C \"c:/Users/GENERAL/Documents/Projects/Threejs/Clicker\" ls-files vendor/)"
     ]
   }
 }

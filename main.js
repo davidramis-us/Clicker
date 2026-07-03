@@ -222,6 +222,9 @@ class Chicken {
 
     // Fall / stun state
     this.velocity = new THREE.Vector3();
+    this.spinX = 0;
+    this.spinY = 0;
+    this.spinZ = 0;
     this.stunTimer = 0;
     this.bloodDripTimer = 0;
   }
@@ -282,15 +285,45 @@ class Chicken {
     );
   }
 
-  shootDown() {
+  shootDown(hitPoint) {
     if (this.state !== 'fly' || this.flyStartTimer < 1) return;
     this.state = 'falling';
-    // Knock back: upward arc + pushed away from camera (world +Z = "up the screen")
-    const spread = (Math.random() - 0.5) * 2.5;
-    this.velocity.set(spread, 4.5, -5).normalize().multiplyScalar(7 + Math.random() * 2);
+
+    const cx = this.group.position.x;
+    const cy = this.group.position.y;
+    const cz = this.group.position.z;
+
+    // Push direction: away from the hit point, always has upward + into-background bias
+    const pushX = cx - hitPoint.x;
+    const pushY = Math.max(cy - hitPoint.y + 2, 2);
+    const pushZ = cz - hitPoint.z - 3;
+    const pushLen = Math.sqrt(pushX * pushX + pushY * pushY + pushZ * pushZ);
+    const speed = 7 + Math.random() * 2;
+    this.velocity.set(
+      (pushX / pushLen) * speed,
+      (pushY / pushLen) * speed,
+      (pushZ / pushLen) * speed
+    );
+
+    // Project the hit offset onto the camera's own right/up axes so that
+    // "left of centre on screen" and "above centre on screen" map correctly
+    // regardless of the camera's tilt.
+    const hitOffset = new THREE.Vector3(hitPoint.x - cx, hitPoint.y - cy, hitPoint.z - cz);
+    const camRight = new THREE.Vector3();
+    const camUp    = new THREE.Vector3();
+    camera.matrixWorld.extractBasis(camRight, camUp, new THREE.Vector3());
+    const offX = hitOffset.dot(camRight); // screen-space left / right
+    const offY = hitOffset.dot(camUp);    // screen-space up / down
+
+    // Spin is zero at dead centre and grows with the square of the screen offset.
+    const distSq = offX * offX + offY * offY;
+    this.spinX = -offY * distSq * 32 + (Math.random() - 0.5) * distSq * 6;
+    this.spinY =  offX * distSq * 18 + (Math.random() - 0.5) * distSq * 4;
+    this.spinZ = -offX * distSq * 32 + (Math.random() - 0.5) * distSq * 6;
+
     this.group.rotation.x = 0;
     this.bloodDripTimer = 0;
-    spawnBlood(this.group.position.x, this.group.position.y + 0.6, this.group.position.z, 24);
+    spawnBlood(cx, cy + 0.6, cz, 24);
   }
 
   update(dt) {
@@ -396,10 +429,11 @@ class Chicken {
   }
 
   updateFalling(dt) {
-    this.velocity.y -= 22 * dt;
+    this.velocity.y -= 36 * dt;
     this.group.position.addScaledVector(this.velocity, dt);
-    this.group.rotation.z += dt * 18;
-    this.group.rotation.x += dt * 14;
+    this.group.rotation.x += this.spinX * dt;
+    this.group.rotation.y += this.spinY * dt;
+    this.group.rotation.z += this.spinZ * dt;
 
     // Continuous blood drip while tumbling
     this.bloodDripTimer -= dt;
@@ -520,16 +554,165 @@ function spawnEgg(x, z, heading) {
   egg.castShadow = true;
   egg.receiveShadow = true;
   scene.add(egg);
-  eggs.push({ mesh: egg, age: 0 });
+  eggs.push({ mesh: egg, age: 0, vx: 0, vz: 0 });
 }
 
+const EGG_RADIUS = 0.13;
+const EGG_REMOVE_DIST = BOUNDS + 5;
+
 function updateEggs(dt) {
+  const friction = Math.pow(0.1, dt); // velocity decays to ~10% per second
+  for (let i = eggs.length - 1; i >= 0; i--) {
+    const egg = eggs[i];
+    if (egg.age < EGG_POP_DURATION) {
+      egg.age += dt;
+      const t = Math.min(1, egg.age / EGG_POP_DURATION);
+      egg.mesh.scale.setScalar(Math.max(0.001, t * t * (3 - 2 * t)));
+      continue;
+    }
+    egg.vx *= friction;
+    egg.vz *= friction;
+    egg.mesh.position.x += egg.vx * dt;
+    egg.mesh.position.z += egg.vz * dt;
+    const spd = Math.sqrt(egg.vx * egg.vx + egg.vz * egg.vz);
+    if (spd > 0.05) {
+      egg.mesh.rotation.z -= egg.vx * dt * 2.5;
+      egg.mesh.rotation.x += egg.vz * dt * 2.5;
+    }
+    if (Math.abs(egg.mesh.position.x) > EGG_REMOVE_DIST ||
+        Math.abs(egg.mesh.position.z) > EGG_REMOVE_DIST) {
+      scene.remove(egg.mesh);
+      eggs.splice(i, 1);
+    }
+  }
+}
+
+// ---------- Rake ----------
+
+const PRONG_COUNT = 5;
+const RAKE_HEAD_WIDTH = 1.2;
+const PRONG_RADIUS = 0.055;
+const PUSH_STRENGTH = 22;
+const EGG_EGG_STRENGTH = 10;
+const MAX_EGG_SPEED = 8;
+
+// Rake tilts forward so prong tips sit on the ground and handle rises into air.
+// Euler order YXZ: Y sets heading, X tilt stays in local frame regardless of heading.
+const RAKE_TILT = Math.PI * 45 / 180;
+// Raise the group so tilted prong tips (local z=0.52, y=0.04) land at world y≈0
+const RAKE_Y_OFFSET = 0.52 * Math.sin(RAKE_TILT) - 0.04 * Math.cos(RAKE_TILT);
+
+const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+const groundPoint = new THREE.Vector3();
+
+function makeRake() {
+  const group = new THREE.Group();
+  const wood  = new THREE.MeshStandardMaterial({ color: 0x9b6b3a, flatShading: true });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xa8a8a8, flatShading: true });
+
+  // Handle — lies along local -Z (trails behind movement direction)
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.042, 2.2, 5), wood);
+  handle.rotation.x = Math.PI / 2;
+  handle.position.set(0, 0.04, -1.1);
+  handle.castShadow = true;
+  group.add(handle);
+
+  // Head bar — perpendicular cross-piece
+  const headBar = new THREE.Mesh(new THREE.BoxGeometry(RAKE_HEAD_WIDTH + 0.08, 0.05, 0.07), metal);
+  headBar.position.set(0, 0.04, 0.28);
+  headBar.castShadow = true;
+  group.add(headBar);
+
+  // Prongs — leading edge (local +Z), spread evenly across head width
+  const prongsArray = [];
+  for (let i = 0; i < PRONG_COUNT; i++) {
+    const xPos = ((i / (PRONG_COUNT - 1)) - 0.5) * RAKE_HEAD_WIDTH;
+    const prong = new THREE.Mesh(
+      new THREE.CylinderGeometry(PRONG_RADIUS * 0.65, PRONG_RADIUS * 0.45, 0.26, 4),
+      metal
+    );
+    prong.rotation.x = Math.PI / 2;
+    prong.position.set(xPos, 0.04, 0.52);
+    prong.castShadow = true;
+    group.add(prong);
+    prongsArray.push(prong);
+  }
+
+  // YXZ order: heading (Y) rotates first, then tilt (X) is applied in local frame
+  // so the handle always rises behind the prongs regardless of drag direction.
+  group.rotation.order = 'YXZ';
+  group.rotation.y = Math.PI; // default: face into scene
+  group.rotation.x = RAKE_TILT;
+  group.visible = false;
+  scene.add(group);
+  return { group, prongsArray };
+}
+
+const rake = makeRake();
+let raking = false;
+let rakeHeading = Math.PI;
+let prevRakeX = 0;
+let prevRakeZ = 0;
+
+const prongWorldPos = new THREE.Vector3();
+const PRONG_COLL_DIST    = PRONG_RADIUS + EGG_RADIUS;
+const PRONG_COLL_DIST_SQ = PRONG_COLL_DIST * PRONG_COLL_DIST;
+const EGG_EGG_DIST       = EGG_RADIUS * 2;
+const EGG_EGG_DIST_SQ   = EGG_EGG_DIST * EGG_EGG_DIST;
+
+function applyRakeCollision() {
+  // Prong → egg impulse
+  for (const prong of rake.prongsArray) {
+    prong.getWorldPosition(prongWorldPos);
+    const px = prongWorldPos.x;
+    const pz = prongWorldPos.z;
+    for (const egg of eggs) {
+      if (egg.age < EGG_POP_DURATION) continue;
+      const dx = egg.mesh.position.x - px;
+      const dz = egg.mesh.position.z - pz;
+      const distSq = dx * dx + dz * dz;
+      if (distSq < PRONG_COLL_DIST_SQ && distSq > 0.00001) {
+        const dist = Math.sqrt(distSq);
+        const overlap = PRONG_COLL_DIST - dist;
+        const nx = dx / dist;
+        const nz = dz / dist;
+        egg.vx += nx * overlap * PUSH_STRENGTH;
+        egg.vz += nz * overlap * PUSH_STRENGTH;
+        egg.mesh.position.x += nx * overlap * 0.5;
+        egg.mesh.position.z += nz * overlap * 0.5;
+      }
+    }
+  }
+
+  // Egg → egg push-apart
+  for (let i = 0; i < eggs.length; i++) {
+    if (eggs[i].age < EGG_POP_DURATION) continue;
+    for (let j = i + 1; j < eggs.length; j++) {
+      if (eggs[j].age < EGG_POP_DURATION) continue;
+      const dx = eggs[j].mesh.position.x - eggs[i].mesh.position.x;
+      const dz = eggs[j].mesh.position.z - eggs[i].mesh.position.z;
+      const distSq = dx * dx + dz * dz;
+      if (distSq < EGG_EGG_DIST_SQ && distSq > 0.00001) {
+        const dist = Math.sqrt(distSq);
+        const overlap = EGG_EGG_DIST - dist;
+        const nx = dx / dist;
+        const nz = dz / dist;
+        const imp = overlap * EGG_EGG_STRENGTH;
+        eggs[i].vx -= nx * imp;
+        eggs[i].vz -= nz * imp;
+        eggs[j].vx += nx * imp;
+        eggs[j].vz += nz * imp;
+      }
+    }
+  }
+
+  // Cap speed
   for (const egg of eggs) {
-    if (egg.age >= EGG_POP_DURATION) continue;
-    egg.age += dt;
-    const t = Math.min(1, egg.age / EGG_POP_DURATION);
-    const eased = t * t * (3 - 2 * t);
-    egg.mesh.scale.setScalar(Math.max(0.001, eased));
+    const spd = Math.sqrt(egg.vx * egg.vx + egg.vz * egg.vz);
+    if (spd > MAX_EGG_SPEED) {
+      egg.vx = (egg.vx / spd) * MAX_EGG_SPEED;
+      egg.vz = (egg.vz / spd) * MAX_EGG_SPEED;
+    }
   }
 }
 
@@ -601,6 +784,19 @@ renderer.domElement.addEventListener('mousemove', (event) => {
     bullseye.style.display = 'none';
     renderer.domElement.style.cursor = '';
   }
+
+  // Update rake position and heading while dragging
+  if (raking && raycaster.ray.intersectPlane(groundPlane, groundPoint)) {
+    const dx = groundPoint.x - prevRakeX;
+    const dz = groundPoint.z - prevRakeZ;
+    if (dx * dx + dz * dz > 0.0001) {
+      rakeHeading = Math.atan2(dx, dz);
+      rake.group.rotation.y = rakeHeading;
+    }
+    rake.group.position.set(groundPoint.x, RAKE_Y_OFFSET, groundPoint.z);
+    prevRakeX = groundPoint.x;
+    prevRakeZ = groundPoint.z;
+  }
 });
 
 renderer.domElement.addEventListener('mouseleave', () => {
@@ -608,36 +804,50 @@ renderer.domElement.addEventListener('mouseleave', () => {
   renderer.domElement.style.cursor = '';
 });
 
-// ---------- Click handler ----------
+// ---------- Input handlers ----------
 
-renderer.domElement.addEventListener('click', (event) => {
+renderer.domElement.addEventListener('mousedown', (event) => {
   const rect = renderer.domElement.getBoundingClientRect();
   pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
   raycaster.setFromCamera(pointer, camera);
 
-  // Flying chickens take priority — click shoots them down
+  // Flying chickens — shoot
   const flying = chickens.filter((c) => c.state === 'fly');
   if (flying.length) {
     const hits = raycaster.intersectObjects(flying.map((c) => c.group), true);
     if (hits.length > 0) {
       let obj = hits[0].object;
       while (obj && !obj.userData.chicken) obj = obj.parent;
-      if (obj) { obj.userData.chicken.shootDown(); return; }
+      if (obj) { obj.userData.chicken.shootDown(hits[0].point); return; }
     }
   }
 
-  // Walking chickens — click agitates / lays egg
+  // Walking chickens — agitate / lay egg
   const walking = chickens.filter((c) => c.state === 'walk');
   if (walking.length) {
     const hits = raycaster.intersectObjects(walking.map((c) => c.group), true);
     if (hits.length > 0) {
       let obj = hits[0].object;
       while (obj && !obj.userData.chicken) obj = obj.parent;
-      if (obj) obj.userData.chicken.registerClick(hits[0].point);
+      if (obj) { obj.userData.chicken.registerClick(hits[0].point); return; }
     }
   }
+
+  // Ground — start raking
+  if (raycaster.ray.intersectPlane(groundPlane, groundPoint)) {
+    prevRakeX = groundPoint.x;
+    prevRakeZ = groundPoint.z;
+    rake.group.position.set(groundPoint.x, RAKE_Y_OFFSET, groundPoint.z);
+    rake.group.rotation.y = rakeHeading;
+    rake.group.visible = true;
+    raking = true;
+  }
+});
+
+renderer.domElement.addEventListener('mouseup', () => {
+  raking = false;
+  rake.group.visible = false;
 });
 
 // ---------- Animation loop ----------
@@ -649,6 +859,7 @@ function animate() {
   chickens.forEach((c) => c.update(dt));
   updateBlood(dt);
   updateEggs(dt);
+  if (raking) applyRakeCollision();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
